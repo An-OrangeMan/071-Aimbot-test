@@ -1,0 +1,7 @@
+# Store every file byte-for-byte, with no end-of-line conversion.
+#
+# This project's sources are GBK-encoded (not UTF-8) and deliberately mix CRLF
+# and LF endings between files. Any automatic EOL normalisation would rewrite
+# every line of every source file and corrupt the Chinese comments, so all
+# conversion is disabled. Files remain diffable; only the EOL filter is off.
+* -text

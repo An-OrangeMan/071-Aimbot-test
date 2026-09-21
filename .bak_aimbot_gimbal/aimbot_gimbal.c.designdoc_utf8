@@ -1,0 +1,333 @@
+#include "user_lib.h"
+#include "aimbot_gimbal.h"
+#include "Chassis_task.h"
+#include "cmsis_os.h"
+#include "arm_math.h"
+#include "INS_task.h"
+#include "hatch.h"
+#include "bsp_laser.h"
+#include <math.h>
+
+#define FRIC_INSURANCE_RC 100
+
+gimbal_control_t gimbal_control;
+static uint8_t gimbal_target_reset = 1;
+static fp32 aimbot_yaw_hold;
+static fp32 aimbot_pitch_hold;
+
+static int16_t gimbal_current_limit(fp32 current)
+{
+    if (current > 32767.0f) return 32767;
+    if (current < -32768.0f) return -32768;
+    return (int16_t)current;
+}
+
+static void gimbal_limit(fp32 *num, fp32 max_limit, fp32 min_limit)
+{
+    if (*num > max_limit) *num = max_limit;
+    else if (*num < min_limit) *num = min_limit;
+}
+
+static fp32 gimbal_yaw_error(fp32 set, fp32 get)
+{
+    fp32 err = set - get;
+    while (err > PI) err -= 2.0f * PI;
+    while (err < -PI) err += 2.0f * PI;
+    return err;
+}
+
+void gimbal_PID_init(gimbal_PID_t *pid, fp32 maxout, fp32 max_iout, fp32 kp, fp32 ki, fp32 kd)
+{
+    if (pid == NULL) return;
+    pid->kp = kp;
+    pid->ki = ki;
+    pid->kd = kd;
+    pid->set = 0.0f;
+    pid->get = 0.0f;
+    pid->err = 0.0f;
+    pid->Pout = 0.0f;
+    pid->Iout = 0.0f;
+    pid->Dout = 0.0f;
+    pid->out = 0.0f;
+    pid->max_iout = max_iout;
+    pid->max_out = maxout;
+}
+
+static fp32 gimbal_PID_calc(gimbal_PID_t *pid, fp32 get, fp32 set, fp32 error_delta, uint8_t yaw_loop)
+{
+    if (pid == NULL) return 0.0f;
+    pid->get = get;
+    pid->set = set;
+    pid->err = yaw_loop ? gimbal_yaw_error(set, get) : set - get;
+    pid->Pout = pid->kp * pid->err;
+    pid->Iout += pid->ki * pid->err;
+    pid->Dout = pid->kd * error_delta;
+    abs_limit(&pid->Iout, pid->max_iout);
+    pid->out = pid->Pout + pid->Iout + pid->Dout;
+    abs_limit(&pid->out, pid->max_out);
+    return pid->out;
+}
+
+static uint8_t aimbot_yaw_valid(fp32 target)
+{
+    return (target >= -PI && target <= PI);
+}
+
+static uint8_t aimbot_pitch_valid(fp32 target)
+{
+    return (target >= PITCH_INS_MIN && target <= PITCH_INS_MAX);
+}
+
+void gimbal_task(void const *pvParameters)
+{
+    vTaskDelay(GIMBAL_TASK_INIT_TIME);
+    gimbal_init(&gimbal_control);
+    while (1)
+    {
+        gimbal_set_mode(&gimbal_control);
+        gimbal_feedback_update(&gimbal_control);
+        gimbal_set_control(&gimbal_control);
+        gimbal_control_loop(&gimbal_control);
+        if (gimbal_control.gimbal_mode == CHASSIS_NO_MOVE)
+        {
+            CAN_cmd_gimbal(0, 0);
+            CAN_cmd_shoot(0, 0, 0);
+        }
+        else
+        {
+            CAN_cmd_gimbal(gimbal_current_limit(gimbal_control.gimbal_yaw_motor.give_current),
+                           gimbal_current_limit(gimbal_control.gimbal_pitch_motor.give_current));
+            CAN_cmd_shoot(gimbal_current_limit(gimbal_control.gimbal_trigger_motor.give_current),
+                          gimbal_current_limit(gimbal_control.gimbal_fric_motor[0].give_current),
+                          gimbal_current_limit(gimbal_control.gimbal_fric_motor[1].give_current));
+        }
+        vTaskDelay(GIMBAL_CONTROL_TIME);
+    }
+}
+
+void gimbal_init(gimbal_control_t *gimbal_task_init)
+{
+    const static fp32 yaw_speed_pid[3] = {YAW_INS_SPEED_PID_KP, YAW_INS_SPEED_PID_KI, YAW_INS_SPEED_PID_KD};
+    const static fp32 pitch_speed_pid[3] = {PITCH_INS_SPEED_PID_KP, PITCH_INS_SPEED_PID_KI, PITCH_INS_SPEED_PID_KD};
+    const static fp32 trigger_speed_pid[3] = {TRIGGER_ENCODE_SPEED_PID_KP, TRIGGER_ENCODE_SPEED_PID_KI, TRIGGER_ENCODE_SPEED_PID_KD};
+    const static fp32 fric_speed_pid[3] = {FRIC_ENCODE_SPEED_PID_KP, FRIC_ENCODE_SPEED_PID_KI, FRIC_ENCODE_SPEED_PID_KD};
+    uint8_t i;
+    if (gimbal_task_init == NULL) return;
+
+    shoot_init();
+    hatch_init();
+    laser_init();
+    gimbal_task_init->gimbal_rc_ctrl = get_remote_control_point();
+    gimbal_task_init->gimbal_aimbot_point = get_aimbot_point();
+    gimbal_task_init->gimbal_INT_angle_point = get_INS_angle_point();
+    gimbal_task_init->gimbal_INT_gyro_point = get_gyro_data_point();
+    gimbal_task_init->gimbal_yaw_motor.gimbal_motor_measure = get_gimbal_motor_measure_point(0);
+    gimbal_task_init->gimbal_pitch_motor.gimbal_motor_measure = get_gimbal_motor_measure_point(1);
+    gimbal_task_init->gimbal_trigger_motor.shoot_motor_measure = get_shoot_motor_measure_point(0);
+    gimbal_task_init->gimbal_fric_motor[0].shoot_motor_measure = get_shoot_motor_measure_point(1);
+    gimbal_task_init->gimbal_fric_motor[1].shoot_motor_measure = get_shoot_motor_measure_point(2);
+    gimbal_task_init->aimbot_mode = AIMBOT_OFF;
+    gimbal_task_init->aimbot_state = AIMBOT_OUT;
+    gimbal_task_init->gimbal_mode = CHASSIS_NO_MOVE;
+    gimbal_task_init->yaw = 0.0f;
+    gimbal_task_init->yaw_set = 0.0f;
+    gimbal_task_init->pitch_set = 0.0f;
+    gimbal_task_init->shoot_switch.fric_flag = FRIC_READY;
+    gimbal_task_init->shoot_switch.fric_mode = FRIC_STOP;
+    gimbal_task_init->shoot_switch.shoot_mode = SHOOT_STOP;
+    gimbal_task_init->shoot_switch.shoot_state = SHOOT_SINGLE_START_STATE;
+    gimbal_task_init->hatch_state = HATCH_CLOSE;
+    gimbal_PID_init(&gimbal_task_init->gimbal_angle_yaw_ins_pid, YAW_INS_ANGLE_PID_MAX_OUT, YAW_INS_ANGLE_PID_MAX_IOUT, YAW_INS_ANGLE_PID_KP, YAW_INS_ANGLE_PID_KI, YAW_INS_ANGLE_PID_KD);
+    PID_init(&gimbal_task_init->gimbal_speed_yaw_ins_pid, PID_POSITION, yaw_speed_pid, YAW_INS_SPEED_PID_MAX_OUT, YAW_INS_SPEED_PID_MAX_IOUT);
+    gimbal_PID_init(&gimbal_task_init->gimbal_angle_pitch_ins_pid, PITCH_INS_ANGLE_PID_MAX_OUT, PITCH_INS_ANGLE_PID_MAX_IOUT, PITCH_INS_ANGLE_PID_KP, PITCH_INS_ANGLE_PID_KI, PITCH_INS_ANGLE_PID_KD);
+    PID_init(&gimbal_task_init->gimbal_speed_pitch_ins_pid, PID_POSITION, pitch_speed_pid, PITCH_INS_SPEED_PID_MAX_OUT, PITCH_INS_SPEED_PID_MAX_IOUT);
+    PID_init(&gimbal_task_init->gimbal_speed_trigger_pid, PID_POSITION, trigger_speed_pid, TRIGGER_ENCODE_SPEED_PID_MAX_OUT, TRIGGER_ENCODE_SPEED_PID_MAX_IOUT);
+    for (i = 0; i < 2; i++)
+        PID_init(&gimbal_task_init->gimbal_speed_fric_pid[i], PID_POSITION, fric_speed_pid, FRIC_ENCODE_SPEED_PID_MAX_OUT, FRIC_ENCODE_SPEED_PID_MAX_IOUT);
+}
+
+void gimbal_set_mode(gimbal_control_t *gimbal_mode_set)
+{
+    uint8_t last_aimbot_mode;
+    uint8_t last_gimbal_mode;
+    uint8_t auto_aim_switch;
+    static uint16_t fric_open_count;
+    if (gimbal_mode_set == NULL) return;
+
+    last_aimbot_mode = gimbal_mode_set->aimbot_mode;
+    last_gimbal_mode = gimbal_mode_set->gimbal_mode;
+    auto_aim_switch = switch_is_up(gimbal_mode_set->gimbal_rc_ctrl->rc.s[CHASSIS_MODE_CHANNEL_1]) &&
+                       switch_is_up(gimbal_mode_set->gimbal_rc_ctrl->rc.s[CHASSIS_MODE_CHANNEL_2]);
+    /* 左拨杆下位是唯一急停档。其余档位不再由云台控制底盘。 */
+    if (switch_is_down(gimbal_mode_set->gimbal_rc_ctrl->rc.s[CHASSIS_MODE_CHANNEL_1]))
+    {
+        gimbal_mode_set->gimbal_mode = CHASSIS_NO_MOVE;
+        gimbal_mode_set->aimbot_mode = AIMBOT_OFF;
+    }
+    else
+    {
+        gimbal_mode_set->gimbal_mode = CHASSIS_NO_FOLLOW_YAW;
+        gimbal_mode_set->aimbot_mode = auto_aim_switch ? AIMBOT_ON : AIMBOT_OFF;
+    }
+    if (last_aimbot_mode != gimbal_mode_set->aimbot_mode || last_gimbal_mode != gimbal_mode_set->gimbal_mode) gimbal_target_reset = 1;
+    aimbot_mode_set(gimbal_mode_set->aimbot_mode);
+
+    if (gimbal_mode_set->gimbal_mode == CHASSIS_NO_MOVE)
+    {
+        gimbal_mode_set->shoot_switch.fric_mode = FRIC_STOP;
+        gimbal_mode_set->shoot_switch.fric_flag = FRIC_STOP;
+        gimbal_mode_set->shoot_switch.shoot_mode = SHOOT_STOP;
+        return;
+    }
+    gimbal_mode_set->shoot_switch.encoding_switch_ecd = gimbal_mode_set->gimbal_rc_ctrl->rc.ch[SHOOT_MODE_CHANNEL];
+    if (ABS(gimbal_mode_set->shoot_switch.encoding_switch_ecd) < 10) gimbal_mode_set->shoot_switch.fric_flag = FRIC_READY;
+    if (gimbal_mode_set->shoot_switch.fric_mode == FRIC_STOP && gimbal_mode_set->shoot_switch.fric_flag == FRIC_READY && gimbal_mode_set->shoot_switch.encoding_switch_ecd <= -400)
+    {
+        fric_open_count++;
+        if (fric_open_count >= FRIC_INSURANCE_RC)
+        {
+            gimbal_mode_set->shoot_switch.fric_mode = FRIC_START;
+            gimbal_mode_set->shoot_switch.fric_flag = FRIC_START;
+            fric_open_count = 0;
+        }
+    }
+    else if (gimbal_mode_set->shoot_switch.fric_mode == FRIC_START && gimbal_mode_set->shoot_switch.fric_flag == FRIC_READY && gimbal_mode_set->shoot_switch.encoding_switch_ecd <= -400)
+    {
+        gimbal_mode_set->shoot_switch.fric_mode = FRIC_STOP;
+        gimbal_mode_set->shoot_switch.fric_flag = FRIC_STOP;
+    }
+    if (gimbal_mode_set->shoot_switch.fric_mode == FRIC_STOP && gimbal_mode_set->gimbal_rc_ctrl->mouse.press_l == 1)
+    {
+        gimbal_mode_set->shoot_switch.fric_mode = FRIC_START;
+        gimbal_mode_set->shoot_switch.fric_flag = FRIC_START;
+    }
+    else if (gimbal_mode_set->shoot_switch.fric_mode == FRIC_START && gimbal_mode_set->gimbal_rc_ctrl->key[KEY_PRESS].e == 1)
+    {
+        gimbal_mode_set->shoot_switch.fric_mode = FRIC_STOP;
+        gimbal_mode_set->shoot_switch.fric_flag = FRIC_STOP;
+    }
+    if (gimbal_mode_set->shoot_switch.encoding_switch_ecd > 200 && gimbal_mode_set->shoot_switch.encoding_switch_ecd < 450)
+        gimbal_mode_set->shoot_switch.shoot_mode = SHOOT_SINGLE_START;
+    else if (gimbal_mode_set->shoot_switch.encoding_switch_ecd > 450)
+        gimbal_mode_set->shoot_switch.shoot_mode = SHOOT_CONTINUOUS_START;
+    else if (gimbal_mode_set->gimbal_rc_ctrl->mouse.press_l == 1 && fabs(gimbal_mode_set->gimbal_fric_motor[0].speed) > 10.0f)
+        gimbal_mode_set->shoot_switch.shoot_mode = SHOOT_SINGLE_START;
+    else
+        gimbal_mode_set->shoot_switch.shoot_mode = SHOOT_STOP;
+    if (get_vision_cmd_point()->shoot && gimbal_mode_set->aimbot_mode == AIMBOT_ON && gimbal_mode_set->aimbot_state == AIMBOT_GET && gimbal_mode_set->shoot_switch.fric_mode == FRIC_START)
+        gimbal_mode_set->shoot_switch.shoot_mode = SHOOT_CONTINUOUS_START;
+}
+
+void gimbal_feedback_update(gimbal_control_t *gimbal_task_update)
+{
+    uint8_t i;
+    if (gimbal_task_update == NULL) return;
+    gimbal_task_update->ins_data.roll = gimbal_task_update->gimbal_INT_angle_point[ROLL_CHANNEL];
+    gimbal_task_update->ins_data.pitch = gimbal_task_update->gimbal_INT_angle_point[PITCH_CHANNEL];
+    gimbal_task_update->ins_data.yaw = gimbal_task_update->gimbal_INT_angle_point[YAW_CHANNEL];
+    gimbal_task_update->gimbal_yaw_motor.speed = gimbal_task_update->gimbal_yaw_motor.gimbal_motor_measure->speed_rpm;
+    gimbal_task_update->gimbal_pitch_motor.speed = gimbal_task_update->gimbal_pitch_motor.gimbal_motor_measure->speed_rpm;
+    gimbal_task_update->gimbal_yaw_motor.absolute_angle = gimbal_task_update->gimbal_yaw_motor.gimbal_motor_measure->ecd;
+    gimbal_task_update->gimbal_pitch_motor.absolute_angle = gimbal_task_update->gimbal_pitch_motor.gimbal_motor_measure->ecd;
+    gimbal_task_update->gimbal_trigger_motor.speed = gimbal_task_update->gimbal_trigger_motor.shoot_motor_measure->speed_rpm;
+    for (i = 0; i < 2; i++) gimbal_task_update->gimbal_fric_motor[i].speed = gimbal_task_update->gimbal_fric_motor[i].shoot_motor_measure->speed_rpm;
+    gimbal_task_update->aimbot_state = gimbal_task_update->gimbal_aimbot_point->aimbot_state;
+    gimbal_task_update->gimbal_yaw_motor.motor_gyro = arm_cos_f32(gimbal_task_update->ins_data.pitch) * gimbal_task_update->gimbal_INT_gyro_point[INS_GYRO_Z_ADDRESS_OFFSET] - arm_sin_f32(gimbal_task_update->ins_data.pitch) * gimbal_task_update->gimbal_INT_gyro_point[INS_GYRO_X_ADDRESS_OFFSET];
+    gimbal_task_update->gimbal_pitch_motor.motor_gyro = gimbal_task_update->gimbal_INT_gyro_point[INS_GYRO_Y_ADDRESS_OFFSET];
+}
+
+void gimbal_set_control(gimbal_control_t *gimbal_set_control_t)
+{
+    if (gimbal_set_control_t == NULL || gimbal_set_control_t->gimbal_mode == CHASSIS_NO_MOVE) return;
+    if (gimbal_target_reset)
+    {
+        gimbal_set_control_t->gimbal_yaw_motor.absolute_angle_set = gimbal_set_control_t->ins_data.yaw;
+        gimbal_set_control_t->gimbal_pitch_motor.absolute_angle_set = gimbal_set_control_t->ins_data.pitch;
+        aimbot_yaw_hold = gimbal_set_control_t->ins_data.yaw;
+        aimbot_pitch_hold = gimbal_set_control_t->ins_data.pitch;
+        gimbal_target_reset = 0;
+    }
+    if (gimbal_set_control_t->aimbot_mode == AIMBOT_ON)
+    {
+        if (gimbal_set_control_t->aimbot_state == AIMBOT_GET)
+        {
+            if (aimbot_yaw_valid(gimbal_set_control_t->gimbal_aimbot_point->target_yaw)) aimbot_yaw_hold = gimbal_set_control_t->gimbal_aimbot_point->target_yaw;
+            if (aimbot_pitch_valid(gimbal_set_control_t->gimbal_aimbot_point->target_pitch)) aimbot_pitch_hold = gimbal_set_control_t->gimbal_aimbot_point->target_pitch;
+        }
+        gimbal_set_control_t->gimbal_yaw_motor.absolute_angle_set = aimbot_yaw_hold;
+        gimbal_set_control_t->gimbal_pitch_motor.absolute_angle_set = aimbot_pitch_hold;
+    }
+    else
+    {
+        gimbal_set_control_t->yaw_set = -(gimbal_set_control_t->gimbal_rc_ctrl->rc.ch[RC_YAW_CHANNEL] * GIMBAL_OPEN_RC_YAW_SEN + gimbal_set_control_t->gimbal_rc_ctrl->mouse.x * GIMBAL_OPEN_X_YAW_SEN);
+        if (gimbal_set_control_t->yaw_set <= 25.0f && gimbal_set_control_t->yaw_set >= -25.0f) gimbal_set_control_t->yaw_set = 0.0f;
+        gimbal_set_control_t->pitch_set = gimbal_set_control_t->gimbal_rc_ctrl->rc.ch[RC_PITCH_CHANNEL] * GIMBAO_OPEN_RC_PITCH_FAST_SEN - gimbal_set_control_t->gimbal_rc_ctrl->mouse.y * GIMBAL_OPEN_Y_PITCH_SEN;
+        gimbal_set_control_t->gimbal_yaw_motor.absolute_angle_set = loop_fp32_constrain(gimbal_set_control_t->gimbal_yaw_motor.absolute_angle_set + gimbal_set_control_t->yaw_set * YAW_INS_OPEN_RC_YAW_SEN, -PI, PI);
+        gimbal_set_control_t->gimbal_pitch_motor.absolute_angle_set += gimbal_set_control_t->pitch_set * GIMBAL_PITCH_INS_RATE;
+        gimbal_limit(&gimbal_set_control_t->gimbal_pitch_motor.absolute_angle_set, PITCH_INS_MAX, PITCH_INS_MIN);
+    }
+    if (gimbal_set_control_t->shoot_switch.fric_mode == FRIC_START)
+    {
+        gimbal_set_control_t->gimbal_fric_motor[0].speed_set = FRIC_SHOOT_LEFT_SPEED;
+        gimbal_set_control_t->gimbal_fric_motor[1].speed_set = -FRIC_SHOOT_RIGHT_SPEED;
+    }
+    else
+    {
+        gimbal_set_control_t->gimbal_fric_motor[0].speed_set = 0.0f;
+        gimbal_set_control_t->gimbal_fric_motor[1].speed_set = 0.0f;
+        gimbal_set_control_t->gimbal_trigger_motor.speed_set = 0.0f;
+    }
+    if (gimbal_set_control_t->shoot_switch.shoot_mode == SHOOT_SINGLE_START && gimbal_set_control_t->shoot_switch.fric_mode == FRIC_START)
+        gimbal_set_control_t->gimbal_trigger_motor.shoot_delay = TRIGGER_SHOOT_SPEED_RATE_SLOW;
+    else if ((gimbal_set_control_t->shoot_switch.shoot_mode == SHOOT_CONTINUOUS_START || gimbal_set_control_t->shoot_switch.shoot_mode == SHOOT_WITHOUT_CONTROL) && gimbal_set_control_t->shoot_switch.fric_mode == FRIC_START)
+        gimbal_set_control_t->gimbal_trigger_motor.shoot_delay = TRIGGER_SHOOT_SPEED_RATE_FAST;
+    else
+        gimbal_set_control_t->gimbal_trigger_motor.shoot_delay = TRIGGER_SHOOT_STOP;
+    shoot_task(&gimbal_set_control_t->shoot_switch.trigger_state, gimbal_set_control_t->shoot_switch.shoot_mode, gimbal_set_control_t->shoot_switch.fric_mode, &gimbal_set_control_t->gimbal_trigger_motor.speed_set, gimbal_set_control_t->gimbal_trigger_motor.shoot_delay);
+}
+
+static void gimbal_motor_PID_control(gimbal_control_t *gimbal_pid_control)
+{
+    gimbal_pid_control->gimbal_yaw_motor.motor_gyro_set = gimbal_PID_calc(&gimbal_pid_control->gimbal_angle_yaw_ins_pid, gimbal_pid_control->ins_data.yaw, gimbal_pid_control->gimbal_yaw_motor.absolute_angle_set, gimbal_pid_control->gimbal_yaw_motor.motor_gyro, 1);
+    gimbal_pid_control->gimbal_yaw_motor.current_set = PID_calc(&gimbal_pid_control->gimbal_speed_yaw_ins_pid, gimbal_pid_control->gimbal_yaw_motor.motor_gyro, gimbal_pid_control->gimbal_yaw_motor.motor_gyro_set);
+    gimbal_pid_control->gimbal_pitch_motor.motor_gyro_set = gimbal_PID_calc(&gimbal_pid_control->gimbal_angle_pitch_ins_pid, gimbal_pid_control->ins_data.pitch, gimbal_pid_control->gimbal_pitch_motor.absolute_angle_set, gimbal_pid_control->gimbal_pitch_motor.motor_gyro, 0);
+    gimbal_pid_control->gimbal_pitch_motor.current_set = PID_calc(&gimbal_pid_control->gimbal_speed_pitch_ins_pid, gimbal_pid_control->gimbal_pitch_motor.motor_gyro, gimbal_pid_control->gimbal_pitch_motor.motor_gyro_set);
+}
+
+static void trigger_motor_PID_control(gimbal_control_t *trigger_motor_control)
+{
+    trigger_motor_control->gimbal_trigger_motor.current_set = PID_calc(&trigger_motor_control->gimbal_speed_trigger_pid, trigger_motor_control->gimbal_trigger_motor.speed, trigger_motor_control->gimbal_trigger_motor.speed_set);
+    trigger_motor_control->gimbal_trigger_motor.give_current = gimbal_current_limit(trigger_motor_control->gimbal_trigger_motor.current_set);
+}
+
+static void fric_motor_PID_control(gimbal_control_t *fric_motor_control)
+{
+    uint8_t i;
+    for (i = 0; i < 2; i++)
+    {
+        fric_motor_control->gimbal_fric_motor[i].current_set = PID_calc(&fric_motor_control->gimbal_speed_fric_pid[i], fric_motor_control->gimbal_fric_motor[i].speed, fric_motor_control->gimbal_fric_motor[i].speed_set);
+        fric_motor_control->gimbal_fric_motor[i].give_current = gimbal_current_limit(fric_motor_control->gimbal_fric_motor[i].current_set);
+    }
+}
+
+void gimbal_control_loop(gimbal_control_t *gimbal_control_loop_t)
+{
+    if (gimbal_control_loop_t == NULL || gimbal_control_loop_t->gimbal_mode == CHASSIS_NO_MOVE) return;
+    gimbal_motor_PID_control(gimbal_control_loop_t);
+    trigger_motor_PID_control(gimbal_control_loop_t);
+    fric_motor_PID_control(gimbal_control_loop_t);
+    gimbal_control_loop_t->gimbal_yaw_motor.give_current = gimbal_current_limit(gimbal_control_loop_t->gimbal_yaw_motor.current_set);
+    gimbal_control_loop_t->gimbal_pitch_motor.give_current = gimbal_current_limit(gimbal_control_loop_t->gimbal_pitch_motor.current_set);
+    if (gimbal_control_loop_t->shoot_switch.fric_mode == FRIC_START) laser_on();
+    else laser_off();
+}
+
+void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
+{
+    HAL_GPIO_EXTI_Callback_INS(GPIO_Pin);
+}
+
+const gimbal_control_t *get_gimbal_move_point(void)
+{
+    return &gimbal_control;
+}

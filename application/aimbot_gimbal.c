@@ -1,0 +1,407 @@
+#include "user_lib.h"
+#include "aimbot_gimbal.h"
+#include "CAN_receive.h"
+#include "Chassis_task.h"
+#include "cmsis_os.h"
+#include "INS_task.h"
+
+//自瞄接管前的保护延时
+#define AIMBOT_INSURANCE	1
+
+gimbal_control_t gimbal_control;
+
+
+//下发前给电流值限幅, 防止超出 int16 范围回绕反号
+static int16_t gimbal_current_limit(fp32 current)
+{
+	if(current > 32767.0f)
+		return 32767;
+	else if(current < -32768.0f)
+		return -32768;
+	else
+		return (int16_t)current;
+}
+
+/**
+  * @brief          初始化"gimbal_control"变量，包括pid初始化， 遥控器指针初始化，云台电机指针初始化，陀螺仪角度指针初始化
+  * @param[out]     gimbal_init:"gimbal_control"变量指针.
+  * @retval         none
+  */
+void gimbal_PID_init(gimbal_PID_t *pid, fp32 maxout, fp32 max_iout, fp32 kp, fp32 ki, fp32 kd)
+{
+    if (pid == NULL)
+    {
+        return;
+    }
+    pid->kp = kp;
+    pid->ki = ki;
+    pid->kd = kd;
+
+    pid->err = 0.0f;
+    pid->get = 0.0f;
+
+    pid->max_iout = max_iout;
+    pid->max_out = maxout;
+}
+
+fp32 gimbal_PID_calc(gimbal_PID_t *pid, fp32 get, fp32 set, fp32 error_delta)
+{
+//    fp32 err;
+    if (pid == NULL)
+    {
+        return 0.0f;
+    }
+    pid->get = get;
+    pid->set = set;
+
+    pid->err = set - get;
+//    pid->err = loop_fp32_constrain(err, -PI, PI);
+    pid->Pout = pid->kp * pid->err;
+    pid->Iout += pid->ki * pid->err;
+    pid->Dout = pid->kd * error_delta;
+    abs_limit(&pid->Iout, pid->max_iout);
+    pid->out = pid->Pout + pid->Iout + pid->Dout;
+    abs_limit(&pid->out, pid->max_out);
+    return pid->out;
+}
+
+void gimbal_limit(fp32 *num, fp32 max_limix, fp32 min_limit)
+{
+	if(*num > max_limix)
+	{
+		*num = max_limix;
+	}
+	else if(*num < min_limit)
+	{
+		*num = min_limit;
+	}
+}
+
+void gimbal_ins_data_count(ins_data_t *ins_data_count)
+{
+	
+	ins_data_count->yaw += PI;
+	while(ins_data_count->yaw_last-ins_data_count->yaw>PI)
+		ins_data_count->yaw += PI*2;
+	while(ins_data_count->yaw_last-ins_data_count->yaw<-PI)
+		ins_data_count->yaw -= PI*2;
+	ins_data_count->yaw_last = ins_data_count->yaw;
+}
+
+
+//gimbal要进行的操作
+void gimbal_task(void const *pvParameters)
+{
+	vTaskDelay(GIMBAL_TASK_INIT_TIME);
+
+	gimbal_init(&gimbal_control);
+
+	while(1)
+	{
+		//云台模式设定
+		gimbal_set_mode(&gimbal_control);
+		//云台数据获取
+		gimbal_feedback_update(&gimbal_control);
+		gimbal_set_control(&gimbal_control);
+		gimbal_control_loop(&gimbal_control);
+
+		//无力模式
+		if(gimbal_control.gimbal_mode == CHASSIS_NO_MOVE)
+		{
+			CAN_cmd_gimbal(0, 0);
+		}
+		//使能, 下发PID算出来的电流
+		else
+		{
+			CAN_cmd_gimbal(gimbal_current_limit(gimbal_control.gimbal_yaw_motor.give_current),
+							gimbal_current_limit(gimbal_control.gimbal_pitch_motor.give_current));
+		}
+
+		vTaskDelay(GIMBAL_CONTROL_TIME);
+	}
+}
+
+
+void gimbal_init(gimbal_control_t *gimbal_task_init)
+{
+	if (gimbal_task_init == NULL)
+    {
+        return;
+    }
+
+	//初始值置0
+	gimbal_task_init->yaw = 0;
+	gimbal_task_init->err_gimbal_chassis_ecd = 0;
+	gimbal_task_init->gimbal_mode = CHASSIS_NO_MOVE;	//云台跟随底盘初始化，无力
+	gimbal_task_init->aimbot_mode = AIMBOT_OFF;
+
+	//陀螺仪角度和角速度指针获取
+	gimbal_task_init->gimbal_INT_angle_point = get_INS_angle_point();
+	gimbal_task_init->gimbal_INT_gyro_point = get_gyro_data_point();
+	//获取视觉上位机的目标角度指针
+	gimbal_task_init->gimbal_aimbot_point = get_aimbot_point();
+	//遥控器数据指针获取
+	gimbal_task_init->gimbal_rc_ctrl = get_remote_control_point();
+	//电机数据指针获取
+	gimbal_task_init->gimbal_yaw_motor.gimbal_motor_measure = get_gimbal_motor_measure_point(0);
+	gimbal_task_init->gimbal_pitch_motor.gimbal_motor_measure = get_gimbal_motor_measure_point(1);
+
+	//初始化云台相关PID参数
+	const static fp32 aimbot_speed_pitch_pid[3] = {AIMBOT_PITCH_SPEED_PID_KP, AIMBOT_PITCH_SPEED_PID_KI, AIMBOT_PITCH_SPEED_PID_KD};
+	const static fp32 aimbot_speed_yaw_pid[3] = {AIMBOT_YAW_SPEED_PID_KP, AIMBOT_YAW_SPEED_PID_KI, AIMBOT_YAW_SPEED_PID_KD};
+	const static fp32 gimbal_speed_yaw_ins_pid[3] = {YAW_INS_SPEED_PID_KP, YAW_INS_SPEED_PID_KI, YAW_INS_SPEED_PID_KD};
+	const static fp32 gimbal_speed_pitch_ins_pid[3] = {PITCH_INS_SPEED_PID_KP, PITCH_INS_SPEED_PID_KI, PITCH_INS_SPEED_PID_KD};
+
+	//初始化视觉上位机自瞄的PID
+	gimbal_PID_init(&gimbal_task_init->aimbot_angle_pitch_pid, AIMBOT_PITCH_ANGLE_PID_MAX_OUT, AIMBOT_PITCH_ANGLE_PID_MAX_IOUT, AIMBOT_PITCH_ANGLE_PID_KP, AIMBOT_PITCH_ANGLE_PID_KI, AIMBOT_PITCH_ANGLE_PID_KD);
+	PID_init(&gimbal_task_init->aimbot_speed_pitch_pid, PID_POSITION, aimbot_speed_pitch_pid, AIMBOT_PITCH_SPEED_PID_MAX_OUT, AIMBOT_PITCH_SPEED_PID_MAX_IOUT);
+	gimbal_PID_init(&gimbal_task_init->aimbot_angle_yaw_pid, AIMBOT_YAW_ANGLE_PID_MAX_OUT, AIMBOT_YAW_ANGLE_PID_MAX_IOUT, AIMBOT_YAW_ANGLE_PID_KP, AIMBOT_YAW_ANGLE_PID_KI, AIMBOT_YAW_ANGLE_PID_KD);
+	PID_init(&gimbal_task_init->aimbot_speed_yaw_pid, PID_POSITION, aimbot_speed_yaw_pid, AIMBOT_YAW_SPEED_PID_MAX_OUT, AIMBOT_YAW_SPEED_PID_MAX_IOUT);
+	//初始化遥控器陀螺仪yaw轴PID
+	gimbal_PID_init(&gimbal_task_init->gimbal_angle_yaw_ins_pid, YAW_INS_ANGLE_PID_MAX_OUT, YAW_INS_ANGLE_PID_MAX_IOUT, YAW_INS_ANGLE_PID_KP, YAW_INS_ANGLE_PID_KI, YAW_INS_ANGLE_PID_KD);
+	PID_init(&gimbal_task_init->gimbal_speed_yaw_ins_pid, PID_POSITION, gimbal_speed_yaw_ins_pid, YAW_INS_SPEED_PID_MAX_OUT, YAW_INS_SPEED_PID_MAX_IOUT);
+	//初始化遥控器陀螺仪pitch轴PID
+	gimbal_PID_init(&gimbal_task_init->gimbal_angle_pitch_ins_pid, PITCH_INS_ANGLE_PID_MAX_OUT, PITCH_INS_ANGLE_PID_MAX_IOUT, PITCH_INS_ANGLE_PID_KP, PITCH_INS_ANGLE_PID_KI, PITCH_INS_ANGLE_PID_KD);
+	PID_init(&gimbal_task_init->gimbal_speed_pitch_ins_pid, PID_POSITION, gimbal_speed_pitch_ins_pid, PITCH_INS_SPEED_PID_MAX_OUT, PITCH_INS_SPEED_PID_MAX_IOUT);
+
+	//先把当前姿态读进来, 目标角度对齐当前角度, 防止开机第一帧猛冲一下
+	gimbal_task_init->ins_data.roll = gimbal_task_init->gimbal_INT_angle_point[ROLL_CHANNEL];
+	gimbal_task_init->ins_data.pitch = gimbal_task_init->gimbal_INT_angle_point[PITCH_CHANNEL];
+	gimbal_task_init->ins_data.yaw = gimbal_task_init->gimbal_INT_angle_point[YAW_CHANNEL];
+	gimbal_ins_data_count(&gimbal_task_init->ins_data);
+	gimbal_task_init->ins_data.yaw_target = gimbal_task_init->ins_data.yaw;
+	gimbal_task_init->ins_data.pitch_target = gimbal_task_init->ins_data.pitch;
+}
+
+
+//云台模式设定: 只区分 无力 / 遥控器 / 视觉上位机
+void gimbal_set_mode(gimbal_control_t *gimbal_mode_set)
+{
+	if (gimbal_mode_set == NULL)
+    {
+        return;
+    }
+
+	//CH1下 = 云台无力, 其余组合 = 遥控器控制
+	if (switch_is_down(gimbal_mode_set->gimbal_rc_ctrl->rc.s[CHASSIS_MODE_CHANNEL_1]))
+	{
+		//云台无力
+		gimbal_mode_set->gimbal_mode = CHASSIS_NO_MOVE;
+	}
+	else
+	{
+		//云台陀螺仪控制
+		gimbal_mode_set->gimbal_mode = CHASSIS_FOLLOW_INS_YAW;
+	}
+
+	//视觉上位机接管的条件: 开关拨到自瞄位(CH1上+CH2上) 且 上位机要求接管(control=1)
+	//两个条件同时成立才接管, 保证任何时候拨一下开关就能用遥控器夺回控制权
+	if (switch_is_up(gimbal_mode_set->gimbal_rc_ctrl->rc.s[CHASSIS_MODE_CHANNEL_1]) &&
+		switch_is_up(gimbal_mode_set->gimbal_rc_ctrl->rc.s[CHASSIS_MODE_CHANNEL_2]) &&
+		get_vision_cmd_point()->control)
+	{
+		gimbal_mode_set->aimbot_mode = AIMBOT_ON;
+	}
+	else
+	{
+		gimbal_mode_set->aimbot_mode = AIMBOT_OFF;
+	}
+
+	//把当前的云台模式同步给上位机
+	aimbot_mode_set(gimbal_mode_set->aimbot_mode);
+}
+
+
+void gimbal_feedback_update(gimbal_control_t *gimbal_task_update)
+{
+	if (gimbal_task_update == NULL)
+    {
+        return;
+    }
+	//获取陀螺仪数据
+	gimbal_task_update->ins_data.roll = gimbal_task_update->gimbal_INT_angle_point[ROLL_CHANNEL];
+	gimbal_task_update->ins_data.pitch = gimbal_task_update->gimbal_INT_angle_point[PITCH_CHANNEL];
+	gimbal_task_update->ins_data.yaw = gimbal_task_update->gimbal_INT_angle_point[YAW_CHANNEL] - gimbal_task_update->gimbal_yaw_motor.gimbal_motor_measure->speed_rpm*GIMBAL_SPIN_YAW_BUFFER;
+	gimbal_ins_data_count(&gimbal_task_update->ins_data);
+	//计算yaw轴6020数据
+	gimbal_task_update->gimbal_yaw_motor.speed = gimbal_task_update->gimbal_yaw_motor.gimbal_motor_measure->speed_rpm;
+	gimbal_task_update->gimbal_yaw_motor.absolute_angle = gimbal_task_update->gimbal_yaw_motor.gimbal_motor_measure->ecd;
+	//计算pitch轴6020数据
+	gimbal_task_update->gimbal_pitch_motor.speed = gimbal_task_update->gimbal_pitch_motor.gimbal_motor_measure->speed_rpm;
+	gimbal_task_update->gimbal_pitch_motor.absolute_angle = gimbal_task_update->gimbal_pitch_motor.gimbal_motor_measure->ecd;
+
+	//陀螺仪角速度, 直接取yaw轴和pitch轴的分量
+	gimbal_task_update->gimbal_yaw_motor.motor_gyro = *(gimbal_task_update->gimbal_INT_gyro_point + INS_GYRO_Z_ADDRESS_OFFSET);
+	gimbal_task_update->gimbal_pitch_motor.motor_gyro = *(gimbal_task_update->gimbal_INT_gyro_point + INS_GYRO_Y_ADDRESS_OFFSET);
+}
+
+
+//遥控器给yaw,pitch目标赋值
+void gimbal_set_control(gimbal_control_t *gimbal_set_control_t)
+{
+	if (gimbal_set_control_t == NULL)
+    {
+        return;
+    }
+
+	//只有遥控器控制的时候才需要算遥控器的目标值, 自瞄的目标值由上位机直接给
+	if(gimbal_set_control_t->gimbal_mode == CHASSIS_NO_MOVE || gimbal_set_control_t->aimbot_mode == AIMBOT_ON)
+	{
+		return;
+	}
+
+	//遥控器摇杆和鼠标给目标角度
+	gimbal_set_control_t->yaw_set = -(gimbal_set_control_t->gimbal_rc_ctrl->rc.ch[RC_YAW_CHANNEL] * GIMBAL_OPEN_RC_YAW_SEN + gimbal_set_control_t->gimbal_rc_ctrl->mouse.x*GIMBAL_OPEN_X_YAW_SEN);
+	//死区, 防止摇杆回中不准导致漂移
+	if(gimbal_set_control_t->yaw_set<=25&&gimbal_set_control_t->yaw_set>=-25)
+		gimbal_set_control_t->yaw_set=0;
+	gimbal_set_control_t->pitch_set = (gimbal_set_control_t->gimbal_rc_ctrl->rc.ch[RC_PITCH_CHANNEL] * GIMBAO_OPEN_RC_PITCH_FAST_SEN - gimbal_set_control_t->gimbal_rc_ctrl->mouse.y*GIMBAL_OPEN_Y_PITCH_SEN);
+}
+
+//底盘舵向起转判断
+void gimbal_to_chassis_follow_yaw_determine(gimbal_control_t *gimbal_chassis_follow_yaw)
+{	
+	//底盘跟随模式计算编码器差值传入底盘
+	if(gimbal_chassis_follow_yaw->gimbal_yaw_motor.absolute_angle - M6020_GIMBAL_ANGLE_YAW != 0)
+		gimbal_chassis_follow_yaw->err_gimbal_chassis_ecd = gimbal_chassis_follow_yaw->gimbal_yaw_motor.absolute_angle - M6020_GIMBAL_ANGLE_YAW;
+	//优劣弧计算
+	if(gimbal_chassis_follow_yaw->err_gimbal_chassis_ecd>HALF_ECD_RANGE)			
+		gimbal_chassis_follow_yaw->err_gimbal_chassis_ecd -= ECD_RANGE;
+	else if(gimbal_chassis_follow_yaw->err_gimbal_chassis_ecd<-HALF_ECD_RANGE)		
+		gimbal_chassis_follow_yaw->err_gimbal_chassis_ecd += ECD_RANGE;
+	//过幅限制
+//	abs_limit(&gimbal_chassis_follow_yaw->err_gimbal_chassis_ecd, GIMBAO_TURN_LIMIT);
+	
+	
+		gimbal_chassis_follow_yaw->yaw = gimbal_chassis_follow_yaw->err_gimbal_chassis_ecd;
+}
+
+//遥控器控制云台yaw
+void gimbal_ins_yaw_control(gimbal_control_t *gimbal_ins)
+{
+	//遥控器的积分量累加, 再叠加到陀螺仪当前角度上
+	gimbal_ins->gimbal_yaw_motor.add += gimbal_ins->yaw_set*YAW_INS_OPEN_RC_YAW_SEN;
+	gimbal_ins->gimbal_yaw_motor.absolute_angle_set = gimbal_ins->ins_data.yaw_target + gimbal_ins->gimbal_yaw_motor.add;
+
+	//yaw轴角度环PID
+	gimbal_ins->gimbal_yaw_motor.motor_gyro_set = gimbal_PID_calc(&gimbal_ins->gimbal_angle_yaw_ins_pid , gimbal_ins->ins_data.yaw,
+																			gimbal_ins->gimbal_yaw_motor.absolute_angle_set, gimbal_ins->gimbal_yaw_motor.motor_gyro);
+	//yaw轴速度环PID
+	gimbal_ins->gimbal_yaw_motor.current_set = PID_calc(&gimbal_ins->gimbal_speed_yaw_ins_pid, gimbal_ins->gimbal_yaw_motor.motor_gyro,
+																	gimbal_ins->gimbal_yaw_motor.motor_gyro_set);
+}
+
+
+//视觉上位机接管云台
+static uint16_t gimbal_aimbot_delay;
+void aimbot_gimbal_control(gimbal_control_t *aimbot_gimbal_control_point)
+{
+	if(aimbot_gimbal_control_point->aimbot_mode != AIMBOT_ON)
+	{
+		gimbal_aimbot_delay = 0;
+		return;
+	}
+
+	if(gimbal_aimbot_delay < AIMBOT_INSURANCE)
+		gimbal_aimbot_delay++;
+	if(gimbal_aimbot_delay < AIMBOT_INSURANCE)
+		return;
+
+	//pitch, 上位机给的目标就是绝对角度目标
+	aimbot_gimbal_control_point->gimbal_pitch_motor.absolute_angle_set = aimbot_gimbal_control_point->gimbal_aimbot_point->target_pitch;
+	//机械限位保护, 防止撞限位
+	gimbal_limit(&aimbot_gimbal_control_point->gimbal_pitch_motor.absolute_angle_set, PITCH_INS_MAX, PITCH_INS_MIN);
+	//pitch轴角度环PID
+	aimbot_gimbal_control_point->gimbal_pitch_motor.motor_gyro_set = gimbal_PID_calc(&aimbot_gimbal_control_point->aimbot_angle_pitch_pid , aimbot_gimbal_control_point->ins_data.pitch,
+																			aimbot_gimbal_control_point->gimbal_pitch_motor.absolute_angle_set, aimbot_gimbal_control_point->gimbal_pitch_motor.motor_gyro);
+	//pitch轴速度环PID
+	aimbot_gimbal_control_point->gimbal_pitch_motor.current_set = PID_calc(&aimbot_gimbal_control_point->aimbot_speed_pitch_pid, aimbot_gimbal_control_point->gimbal_pitch_motor.motor_gyro,
+																			aimbot_gimbal_control_point->gimbal_pitch_motor.motor_gyro_set);
+
+	//yaw, 上位机给的目标就是绝对角度目标
+	aimbot_gimbal_control_point->gimbal_yaw_motor.absolute_angle_set = aimbot_gimbal_control_point->gimbal_aimbot_point->target_yaw;
+	aimbot_gimbal_control_point->gimbal_yaw_motor.absolute_angle_set = loop_fp32_constrain(aimbot_gimbal_control_point->gimbal_yaw_motor.absolute_angle_set, -PI, PI);
+	//yaw轴角度环PID
+	aimbot_gimbal_control_point->gimbal_yaw_motor.motor_gyro_set = gimbal_PID_calc(&aimbot_gimbal_control_point->aimbot_angle_yaw_pid , aimbot_gimbal_control_point->gimbal_INT_angle_point[YAW_CHANNEL] - aimbot_gimbal_control_point->gimbal_yaw_motor.gimbal_motor_measure->speed_rpm*GIMBAL_SPIN_YAW_BUFFER,
+																				aimbot_gimbal_control_point->gimbal_yaw_motor.absolute_angle_set, aimbot_gimbal_control_point->gimbal_yaw_motor.motor_gyro);
+	//yaw轴速度环PID
+	aimbot_gimbal_control_point->gimbal_yaw_motor.current_set = PID_calc(&aimbot_gimbal_control_point->aimbot_speed_yaw_pid, aimbot_gimbal_control_point->gimbal_yaw_motor.motor_gyro,
+																				aimbot_gimbal_control_point->gimbal_yaw_motor.motor_gyro_set);
+}
+
+
+//遥控器控制云台pitch
+void pitch_ins_PID_control(gimbal_control_t *pitch_ins_control)
+{
+	//在机械行程内才允许继续积分
+	if(pitch_ins_control->gimbal_pitch_motor.absolute_angle_set < PITCH_INS_MAX && pitch_ins_control->gimbal_pitch_motor.absolute_angle_set > PITCH_INS_MIN)
+		pitch_ins_control->gimbal_pitch_motor.add += pitch_ins_control->pitch_set*GIMBAL_PITCH_INS_RATE;
+	pitch_ins_control->gimbal_pitch_motor.absolute_angle_set = pitch_ins_control->gimbal_pitch_motor.add + pitch_ins_control->ins_data.pitch_target;
+	//pitch机械限位
+	gimbal_limit(&pitch_ins_control->gimbal_pitch_motor.absolute_angle_set, PITCH_INS_MAX, PITCH_INS_MIN);
+
+	//pitch轴角度环PID
+	pitch_ins_control->gimbal_pitch_motor.motor_gyro_set = gimbal_PID_calc(&pitch_ins_control->gimbal_angle_pitch_ins_pid , pitch_ins_control->ins_data.pitch,
+																			pitch_ins_control->gimbal_pitch_motor.absolute_angle_set, pitch_ins_control->gimbal_pitch_motor.motor_gyro);
+	//pitch轴速度环PID
+	pitch_ins_control->gimbal_pitch_motor.current_set = PID_calc(&pitch_ins_control->gimbal_speed_pitch_ins_pid, pitch_ins_control->gimbal_pitch_motor.motor_gyro,
+																	pitch_ins_control->gimbal_pitch_motor.motor_gyro_set);
+}
+
+
+void gimbal_control_loop(gimbal_control_t *gimbal_control_loop_t)
+{
+	static uint8_t aimbot_last_mode = AIMBOT_OFF;
+	//算云台和底盘的差值, 给底盘跟随用
+	gimbal_to_chassis_follow_yaw_determine(gimbal_control_loop_t);
+
+	//无力, 或者被视觉接管的时候, 遥控器的积分量清零
+		// 视觉放手那一瞬间也要重锁目标角, 否则手动环会把云台拉回开机锁存角度
+	if(gimbal_control_loop_t->gimbal_mode == CHASSIS_NO_MOVE ||
+	   gimbal_control_loop_t->aimbot_mode == AIMBOT_ON ||
+	   aimbot_last_mode == AIMBOT_ON)
+	{
+		gimbal_control_loop_t->gimbal_yaw_motor.add = 0;
+		gimbal_control_loop_t->gimbal_pitch_motor.add = 0;
+		//把遥控器的target值同步到当前角度, 切回遥控器的时候不会跳转头
+		gimbal_control_loop_t->ins_data.yaw_target = gimbal_control_loop_t->ins_data.yaw;
+		gimbal_control_loop_t->ins_data.pitch_target = gimbal_control_loop_t->ins_data.pitch;
+	}
+	aimbot_last_mode = gimbal_control_loop_t->aimbot_mode;
+
+
+	//显式二选一: 视觉上位机接管 还是 遥控器接管
+	if(gimbal_control_loop_t->aimbot_mode == AIMBOT_ON)
+	{
+		//视觉上位机控制云台
+		aimbot_gimbal_control(gimbal_control_loop_t);
+	}
+	else
+	{
+		//遥控器控制云台
+		gimbal_ins_yaw_control(gimbal_control_loop_t);
+		pitch_ins_PID_control(gimbal_control_loop_t);
+	}
+
+	//云台yaw轴最终输出电流
+	gimbal_control_loop_t->gimbal_yaw_motor.give_current = gimbal_control_loop_t->gimbal_yaw_motor.current_set;
+	//云台pitch轴最终输出电流
+	gimbal_control_loop_t->gimbal_pitch_motor.give_current = gimbal_control_loop_t->gimbal_pitch_motor.current_set;
+}
+
+
+void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
+{
+	HAL_GPIO_EXTI_Callback_INS(GPIO_Pin);
+}
+
+
+/**
+  * @brief          获取云台控制指针
+  * @param[in]      none
+  * @retval         获取云台控制指针
+  */
+const gimbal_control_t *get_gimbal_move_point(void)
+{
+    return &gimbal_control;
+}

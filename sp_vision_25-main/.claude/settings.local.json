@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python -c ' *)",
+      "Bash(python .bak_aimbot_gimbal/gen_min.py)"
+    ]
+  }
+}

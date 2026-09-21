@@ -1,0 +1,37 @@
+# Keil MDK build output. This directory alone is 164 MB of .o/.axf/.map/.crf
+# files and must never be committed.
+chassis_task/MDK-ARM/chassis_task/
+Objects/
+Listings/
+
+# Keil per-user / debugger artifacts
+*.uvguix.*
+*.scvd
+*.lst
+*.build_log.htm
+JLinkLog.txt
+JLinkSettings.ini
+
+# Object and dependency files. Also covers a future CMake build of the vision code.
+*.o
+*.axf
+*.elf
+*.crf
+*.d
+*.dep
+*.lnp
+*.iex
+*.sct
+*.map
+*.i
+*.__i
+
+# NOTE: *.bin is deliberately NOT ignored here. sp_vision_25-main/.../assets/*.bin
+# are YOLO model weights, i.e. real source, not build output.
+
+# OS / editor
+.vscode/settings.json
+.claude/settings.local.json
+Thumbs.db
+desktop.ini
+*~

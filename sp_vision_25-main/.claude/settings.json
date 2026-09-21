@@ -1,0 +1,24 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python -c ' *)",
+      "Bash(grep -o \"[A-Za-z0-9_./\\\\\\\\\\\\\\\\]*rtc\\\\.[ch]\" chassis_task/MDK-ARM/*.uvprojx)",
+      "Bash(python .bak_aimbot_gimbal/gen_h.py)",
+      "Bash(python .bak_aimbot_gimbal/gen_c.py)",
+      "Bash(python .bak_aimbot_gimbal/add_to_uvprojx.py)",
+      "Bash(cp application/aimbot_task.c application/aimbot_task.h .bak_aimbot_gimbal/)",
+      "Bash(cp application/aimbot_task.c .bak_aimbot_gimbal/aimbot_task.c.bak2)",
+      "Bash(cp application/aimbot_task.h .bak_aimbot_gimbal/aimbot_task.h.bak2)",
+      "Bash(python .bak_aimbot_gimbal/patch_aimbot_task.py)",
+      "Bash(python .bak_aimbot_gimbal/_patch_c_only.py)",
+      "Bash(cd \"d:/Document/Code/Aimbot_test/ShaoBing1\" && ls /d/ 2>/dev/null | head -30; echo \"---\"; ls /c/ 2>/dev/null | head -30; echo \"--- keil-ish ---\"; ls -d /c/*eil* /d/*eil* /d/*KEIL* /c/*KEIL* 2>/dev/null)",
+      "Read(//d//**)",
+      "Read(//c//**)",
+      "Bash(ls -d \"/c/Program Files \\(x86\\)/Keil_v5\" \"/c/Program Files/Keil_v5\" \"/d/Program Files/Keil_v5\" \"/d/Program Files \\(x86\\)/Keil_v5\" 2>/dev/null; echo \"--- project build dirs ---\"; ls -d \"d:/Document/Code/Aimbot_test/ShaoBing1/chassis_task/MDK-ARM/\"*/ 2>/dev/null; ls \"d:/Document/Code/Aimbot_test/ShaoBing1/chassis_task/MDK-ARM/\" | head -20)",
+      "Read(//c/Program Files \\\\\\(x86\\\\\\)/**)",
+      "Bash(python .bak_aimbot_gimbal/static_check.py)",
+      "Bash(ls -la \"C:/Users/26952/.claude/projects/d--Document-Code-Aimbot-test-ShaoBing1-sp-vision-25-main/memory/\" 2>/dev/null && echo \"=== MEMORY.md ===\" && cat \"C:/Users/26952/.claude/projects/d--Document-Code-Aimbot-test-ShaoBing1-sp-vision-25-main/memory/MEMORY.md\" 2>/dev/null)",
+      "Read(//c/Users/26952/.claude/projects/d--Document-Code-Aimbot-test-ShaoBing1-sp-vision-25-main/memory/**)"
+    ]
+  }
+}
