@@ -4,73 +4,52 @@
 #include "CAN_receive.h"
 #include "referee.h"
 
-// ×ÔÃéÈÎÎñÖÜÆÚ (ms)
+// è‡ªç„ä»»åŠ¡è¿è¡Œå‘¨æœŸ (ms)
 #define AIMBOT_TASK_TIME  40
 
 aimbot_task_t aimbot;
 
-// ×ÔÃéÈÎÎñ
+
+
+// ä»»åŠ¡å‡½æ•°
 void aimbot_task(void const *pvParameters)
 {
     vTaskDelay(1000);
     aimbot_init(&aimbot);
-    static uint8_t freeze_pitch_latched = 0;   // FREEZE_PITCH ÓÃ: Ö»ÔÚ¸Õ½Ó¹ÜÊ±Ëø´æÒ»´Î
+
+    static uint8_t freeze_pitch_latched = 0;   // FREEZE_PITCH è°ƒè¯•: åªåœ¨åˆšæ¥ç®¡æ—¶é”å­˜ä¸€æ¬¡
 
     while (1)
     {
         const vision_cmd_t *vc = get_vision_cmd_point();
         const fp32 *quat = get_INS_quat_point();
 
-        // ÊÓ¾õÏÂ·¢ control=1 Ê±½Ó¹ÜÄ¿±ê½Ç¶È; ·ñÔòÍË³ö×ÔÃé
-        // ×¢Òâ: ÕæÕıµÄ½Ó¹ÜÓë·ñÓÉ gimbal_set_mode() ¾ö¶¨(»¹Òª¿ª¹ØÔÚ×ÔÃéÎ»), ÕâÀïÖ»×¼±¸Ä¿±êÖµ
+        // è§†è§‰ä¸‹å‘ control=1 æ—¶æ¥ç®¡ç›®æ ‡è§’åº¦; å¦åˆ™é€€å‡ºæ¥ç®¡
+        // æ³¨æ„: æœ€ç»ˆçš„æ¥ç®¡åˆ¤å®šåœ¨ gimbal_set_mode() é‡Œåš(éœ€åˆ¤é¥æ§æ¨¡å¼ä½), è¿™é‡Œåªå‡†å¤‡ç›®æ ‡å€¼
         if (vc->control)
         {
-#if AIMBOT_DEBUG_FREEZE_YAW
-            // µ÷ÊÔ: yaw Ä¿±ê = µ±Ç°½Ç¶È, yaw Öá²»³öÁ¦
-            aimbot.target_yaw   = get_INS_angle_point()[YAW_CHANNEL];
-#else
-            aimbot.target_yaw   = vc->yaw;
-#endif
-            // sp_vision ËÍÀ´µÄ pitch ÊÇ"ÏòÉÏÎª¸º"
-            //   (aimer.cpp: pitch = -(traj.pitch + offset); trajectory.hpp: pitch Ì§Í·ÎªÕı)
-            // ¶ø INS_angle[1] ÊÇ"ÏòÉÏÎªÕı", ËùÒÔ±ØĞëÈ¡·´, ·ñÔò pitch »áÕı·´À¡ÍùÏÂ±©³å
-#if AIMBOT_DEBUG_FREEZE_PITCH
-            // µ÷ÊÔ: Ö»ÔÚ¸Õ½Ó¹ÜÄÇÒ»¿ÌËø´æÒ»´Îµ±Ç°½Ç¶È,Ö®ºó±£³ÖÕâ¸ö¾ø¶ÔÄ¿±ê
-            // (Ô­À´µÄĞ´·¨ÊÇ¸ö´øÑÓ³ÙµÄ¸º·´À¡,Ã»ÓĞÎ»ÖÃ¸Õ¶È,ÖØÁ¦»á°Ñ pitch ÔÈËÙÑ¹ÏÂÈ¥)
-            if (!freeze_pitch_latched)
-            {
-                aimbot.target_pitch = get_INS_angle_point()[PITCH_CHANNEL];
-                freeze_pitch_latched = 1;
-            }
-#else
+            aimbot.target_yaw = vc->yaw;
             aimbot.target_pitch = -vc->pitch;
-#endif
+
             aimbot.aimbot_state = AIMBOT_GET;
         }
         else
         {
             aimbot.aimbot_state = AIMBOT_OUT;
-#if AIMBOT_DEBUG_FREEZE_PITCH
-            freeze_pitch_latched = 0;   // ÊÓ¾õËÉÊÖºóÖØĞÂËø´æ
-#endif
         }
 
-#if AIMBOT_DEBUG_BYPASS
-        // µ÷ÊÔ: Ç¿ÖÆ¹Ì¶¨Ä¿±ê, ÍêÈ«ºöÂÔÊÓ¾õÏÂ·¢µÄ yaw/pitch
-        aimbot.target_yaw   = AIMBOT_DEBUG_YAW;
-        aimbot.target_pitch = AIMBOT_DEBUG_PITCH;
-        aimbot.aimbot_state = AIMBOT_GET;
-#endif
+
 				
 
-        // ÉÏ±¨ËÄÔªÊı [x,y,z,w] ¸øÊÓ¾õ×ö×ËÌ¬/EKF
+        // ä¸ŠæŠ¥å››å…ƒæ•° [x,y,z,w] ç»™è§†è§‰åšå§¿æ€/EKF
         CAN_cmd_vision_quat(quat);
 
-        // ÉÏ±¨µ¯ËÙ/Ä£Ê½·´À¡¸øÊÓ¾õ×öµ¯µÀ½âËã
-        // mode: cboard µÄ enum Mode { idle=0, auto_aim=1 }, ×ÔÃéÖĞ²Å±¨ auto_aim
-        // shoot_mode: ShootMode { left_shoot=0, right_shoot=1, both_shoot=2 }, Á½ÂÖ¶¼×ª¾Í±¨ both_shoot
-        // ft_angle: ÉÚ±ø/ÎŞÈË»ú×¨ÓĞÁ¿, ÕâÀï²»ÓÃ
+        // ä¸ŠæŠ¥å­å¼¹/æ¨¡å¼åé¦ˆç»™è§†è§‰ä¸‹ä½æœº
+        // mode: cboard çš„ enum Mode { idle=0, auto_aim=1 }, æ¥ç®¡æ‰æ ‡ auto_aim
+        // shoot_mode: ShootMode { left_shoot=0, right_shoot=1, both_shoot=2 }, æ‰‹åŠ¨å‘å¼¹å°±æ ‡ both_shoot
+        // ft_angle: ç‰¹å®šæœºå‹ä¸“ç”¨, è¿™é‡Œç½® 0 ä¸ç”¨
         CAN_cmd_vision_feedback(get_bullet_speed(), (aimbot.aimbot_mode == AIMBOT_ON) ? 1 : 0, 2, 0.0f);
+
 
         vTaskDelay(AIMBOT_TASK_TIME);
     }

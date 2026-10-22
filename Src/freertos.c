@@ -145,14 +145,14 @@ void MX_FREERTOS_Init(void) {
 	osThreadDef(AimBotTask, aimbot_task, osPriorityAboveNormal, 0, 512);
 	aimbotTaskHandle = osThreadCreate(osThread(AimBotTask), NULL);
 
-	osThreadDef(ChassisTask, chassis_task, osPriorityAboveNormal, 0, 1024);
-	chassisTaskHandle = osThreadCreate(osThread(ChassisTask), NULL);
+//	osThreadDef(ChassisTask, chassis_task, osPriorityAboveNormal, 0, 1024);
+//	chassisTaskHandle = osThreadCreate(osThread(ChassisTask), NULL);
 
 	osThreadDef(REFEREE, referee_usart_task, osPriorityNormal, 0, 128);
     referee_usart_task_handle = osThreadCreate(osThread(REFEREE), NULL);
 	
-    osThreadDef(OLED, oled_task, osPriorityLow, 0, 256);
-    oled_handle = osThreadCreate(osThread(OLED), NULL);
+//    osThreadDef(OLED, oled_task, osPriorityLow, 0, 256);
+//    oled_handle = osThreadCreate(osThread(OLED), NULL);
 	
 	
 //	osThreadDef(ChassisCruiseTASK, chassis_cruise_task, osPriorityLow, 0, 128);

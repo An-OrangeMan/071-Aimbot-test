@@ -5,13 +5,35 @@
 #include "cmsis_os.h"
 #include "INS_task.h"
 
-//×ÔÃé½Ó¹ÜÇ°µÄ±£»¤ÑÓÊ±
+//ï¿½ï¿½ï¿½ï¿½Ó¹ï¿½Ç°ï¿½Ä±ï¿½ï¿½ï¿½ï¿½ï¿½Ê±
 #define AIMBOT_INSURANCE	1
+#define FRIC_INSURANCE_RC		100
+
+// trigger speed rate
+#define TRIGGER_SHOOT_SPEED_RATE_FAST	80
+#define TRIGGER_SHOOT_SPEED_RATE_SLOW	130
+#define TRIGGER_SHOOT_STOP				0
+// friction wheel speed (rpm)
+#define FRIC_SHOOT_LEFT_SPEED			6000
+#define FRIC_SHOOT_RIGHT_SPEED			6000
+
+// trigger speed loop PID
+#define TRIGGER_SPEED_PID_KP			15.0f
+#define TRIGGER_SPEED_PID_KI			0.0f
+#define TRIGGER_SPEED_PID_KD			0.0f
+#define TRIGGER_SPEED_PID_MAX_OUT		10000.0f
+#define TRIGGER_SPEED_PID_MAX_IOUT		5000.0f
+// friction wheel speed loop PID
+#define FRIC_SPEED_PID_KP				15.0f
+#define FRIC_SPEED_PID_KI				0.0f
+#define FRIC_SPEED_PID_KD				0.0f
+#define FRIC_SPEED_PID_MAX_OUT			10000.0f
+#define FRIC_SPEED_PID_MAX_IOUT			1000.0f
 
 gimbal_control_t gimbal_control;
 
 
-//ÏÂ·¢Ç°¸øµçÁ÷ÖµÏÞ·ù, ·ÀÖ¹³¬³ö int16 ·¶Î§»ØÈÆ·´ºÅ
+//ï¿½Â·ï¿½Ç°ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Öµï¿½Þ·ï¿½, ï¿½ï¿½Ö¹ï¿½ï¿½ï¿½ï¿½ int16 ï¿½ï¿½Î§ï¿½ï¿½ï¿½Æ·ï¿½ï¿½ï¿½
 static int16_t gimbal_current_limit(fp32 current)
 {
 	if(current > 32767.0f)
@@ -23,8 +45,8 @@ static int16_t gimbal_current_limit(fp32 current)
 }
 
 /**
-  * @brief          ³õÊ¼»¯"gimbal_control"±äÁ¿£¬°üÀ¨pid³õÊ¼»¯£¬ Ò£¿ØÆ÷Ö¸Õë³õÊ¼»¯£¬ÔÆÌ¨µç»úÖ¸Õë³õÊ¼»¯£¬ÍÓÂÝÒÇ½Ç¶ÈÖ¸Õë³õÊ¼»¯
-  * @param[out]     gimbal_init:"gimbal_control"±äÁ¿Ö¸Õë.
+  * @brief          ï¿½ï¿½Ê¼ï¿½ï¿½"gimbal_control"ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½pidï¿½ï¿½Ê¼ï¿½ï¿½ï¿½ï¿½ Ò£ï¿½ï¿½ï¿½ï¿½Ö¸ï¿½ï¿½ï¿½Ê¼ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ì¨ï¿½ï¿½ï¿½Ö¸ï¿½ï¿½ï¿½Ê¼ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ç½Ç¶ï¿½Ö¸ï¿½ï¿½ï¿½Ê¼ï¿½ï¿½
+  * @param[out]     gimbal_init:"gimbal_control"ï¿½ï¿½ï¿½ï¿½Ö¸ï¿½ï¿½.
   * @retval         none
   */
 void gimbal_PID_init(gimbal_PID_t *pid, fp32 maxout, fp32 max_iout, fp32 kp, fp32 ki, fp32 kd)
@@ -89,7 +111,7 @@ void gimbal_ins_data_count(ins_data_t *ins_data_count)
 }
 
 
-//gimbalÒª½øÐÐµÄ²Ù×÷
+//gimbalÒªï¿½ï¿½ï¿½ÐµÄ²ï¿½ï¿½ï¿½
 void gimbal_task(void const *pvParameters)
 {
 	vTaskDelay(GIMBAL_TASK_INIT_TIME);
@@ -98,23 +120,28 @@ void gimbal_task(void const *pvParameters)
 
 	while(1)
 	{
-		//ÔÆÌ¨Ä£Ê½Éè¶¨
+		//ï¿½ï¿½Ì¨Ä£Ê½ï¿½è¶¨
 		gimbal_set_mode(&gimbal_control);
-		//ÔÆÌ¨Êý¾Ý»ñÈ¡
+		//ï¿½ï¿½Ì¨ï¿½ï¿½ï¿½Ý»ï¿½È¡
 		gimbal_feedback_update(&gimbal_control);
 		gimbal_set_control(&gimbal_control);
 		gimbal_control_loop(&gimbal_control);
 
-		//ÎÞÁ¦Ä£Ê½
+		//ï¿½ï¿½ï¿½ï¿½Ä£Ê½
 		if(gimbal_control.gimbal_mode == CHASSIS_NO_MOVE)
 		{
 			CAN_cmd_gimbal(0, 0);
+			CAN_cmd_shoot(0, 0, 0);
 		}
-		//Ê¹ÄÜ, ÏÂ·¢PIDËã³öÀ´µÄµçÁ÷
+		//Ê¹ï¿½ï¿½, ï¿½Â·ï¿½PIDï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Äµï¿½ï¿½ï¿½
 		else
 		{
 			CAN_cmd_gimbal(gimbal_current_limit(gimbal_control.gimbal_yaw_motor.give_current),
 							gimbal_current_limit(gimbal_control.gimbal_pitch_motor.give_current));
+			CAN_cmd_shoot(gimbal_control.gimbal_trigger_motor.give_current,
+							gimbal_control.gimbal_fric_motor[0].give_current,
+							gimbal_control.gimbal_fric_motor[1].give_current);
+//			CAN_cmd_shoot(50000, 5000, 5000);
 		}
 
 		vTaskDelay(GIMBAL_CONTROL_TIME);
@@ -129,42 +156,61 @@ void gimbal_init(gimbal_control_t *gimbal_task_init)
         return;
     }
 
-	//³õÊ¼ÖµÖÃ0
+	//ï¿½ï¿½Ê¼Öµï¿½ï¿½0
 	gimbal_task_init->yaw = 0;
 	gimbal_task_init->err_gimbal_chassis_ecd = 0;
-	gimbal_task_init->gimbal_mode = CHASSIS_NO_MOVE;	//ÔÆÌ¨¸úËæµ×ÅÌ³õÊ¼»¯£¬ÎÞÁ¦
+	gimbal_task_init->gimbal_mode = CHASSIS_NO_MOVE;	//ï¿½ï¿½Ì¨ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ì³ï¿½Ê¼ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
 	gimbal_task_init->aimbot_mode = AIMBOT_OFF;
 
-	//ÍÓÂÝÒÇ½Ç¶ÈºÍ½ÇËÙ¶ÈÖ¸Õë»ñÈ¡
+	// shooting init
+	shoot_init();
+	gimbal_task_init->shoot_switch.fric_flag = FRIC_READY;
+	gimbal_task_init->shoot_switch.fric_mode = FRIC_STOP;
+	gimbal_task_init->shoot_switch.shoot_mode = SHOOT_STOP;
+	gimbal_task_init->shoot_switch.shoot_state = SHOOT_SINGLE_START_STATE;
+
+	//ï¿½ï¿½ï¿½ï¿½ï¿½Ç½Ç¶ÈºÍ½ï¿½ï¿½Ù¶ï¿½Ö¸ï¿½ï¿½ï¿½È¡
 	gimbal_task_init->gimbal_INT_angle_point = get_INS_angle_point();
 	gimbal_task_init->gimbal_INT_gyro_point = get_gyro_data_point();
-	//»ñÈ¡ÊÓ¾õÉÏÎ»»úµÄÄ¿±ê½Ç¶ÈÖ¸Õë
+	//ï¿½ï¿½È¡ï¿½Ó¾ï¿½ï¿½ï¿½Î»ï¿½ï¿½ï¿½ï¿½Ä¿ï¿½ï¿½Ç¶ï¿½Ö¸ï¿½ï¿½
 	gimbal_task_init->gimbal_aimbot_point = get_aimbot_point();
-	//Ò£¿ØÆ÷Êý¾ÝÖ¸Õë»ñÈ¡
+	//Ò£ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ö¸ï¿½ï¿½ï¿½È¡
 	gimbal_task_init->gimbal_rc_ctrl = get_remote_control_point();
-	//µç»úÊý¾ÝÖ¸Õë»ñÈ¡
+	//ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ö¸ï¿½ï¿½ï¿½È¡
 	gimbal_task_init->gimbal_yaw_motor.gimbal_motor_measure = get_gimbal_motor_measure_point(0);
 	gimbal_task_init->gimbal_pitch_motor.gimbal_motor_measure = get_gimbal_motor_measure_point(1);
+	gimbal_task_init->gimbal_trigger_motor.shoot_motor_measure = get_shoot_motor_measure_point(0);
+	gimbal_task_init->gimbal_fric_motor[0].shoot_motor_measure = get_shoot_motor_measure_point(1);
+	gimbal_task_init->gimbal_fric_motor[1].shoot_motor_measure = get_shoot_motor_measure_point(2);
 
-	//³õÊ¼»¯ÔÆÌ¨Ïà¹ØPID²ÎÊý
+	//ï¿½ï¿½Ê¼ï¿½ï¿½ï¿½ï¿½Ì¨ï¿½ï¿½ï¿½PIDï¿½ï¿½ï¿½ï¿½
 	const static fp32 aimbot_speed_pitch_pid[3] = {AIMBOT_PITCH_SPEED_PID_KP, AIMBOT_PITCH_SPEED_PID_KI, AIMBOT_PITCH_SPEED_PID_KD};
 	const static fp32 aimbot_speed_yaw_pid[3] = {AIMBOT_YAW_SPEED_PID_KP, AIMBOT_YAW_SPEED_PID_KI, AIMBOT_YAW_SPEED_PID_KD};
 	const static fp32 gimbal_speed_yaw_ins_pid[3] = {YAW_INS_SPEED_PID_KP, YAW_INS_SPEED_PID_KI, YAW_INS_SPEED_PID_KD};
 	const static fp32 gimbal_speed_pitch_ins_pid[3] = {PITCH_INS_SPEED_PID_KP, PITCH_INS_SPEED_PID_KI, PITCH_INS_SPEED_PID_KD};
 
-	//³õÊ¼»¯ÊÓ¾õÉÏÎ»»ú×ÔÃéµÄPID
+	//ï¿½ï¿½Ê¼ï¿½ï¿½ï¿½Ó¾ï¿½ï¿½ï¿½Î»ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½PID
 	gimbal_PID_init(&gimbal_task_init->aimbot_angle_pitch_pid, AIMBOT_PITCH_ANGLE_PID_MAX_OUT, AIMBOT_PITCH_ANGLE_PID_MAX_IOUT, AIMBOT_PITCH_ANGLE_PID_KP, AIMBOT_PITCH_ANGLE_PID_KI, AIMBOT_PITCH_ANGLE_PID_KD);
 	PID_init(&gimbal_task_init->aimbot_speed_pitch_pid, PID_POSITION, aimbot_speed_pitch_pid, AIMBOT_PITCH_SPEED_PID_MAX_OUT, AIMBOT_PITCH_SPEED_PID_MAX_IOUT);
 	gimbal_PID_init(&gimbal_task_init->aimbot_angle_yaw_pid, AIMBOT_YAW_ANGLE_PID_MAX_OUT, AIMBOT_YAW_ANGLE_PID_MAX_IOUT, AIMBOT_YAW_ANGLE_PID_KP, AIMBOT_YAW_ANGLE_PID_KI, AIMBOT_YAW_ANGLE_PID_KD);
 	PID_init(&gimbal_task_init->aimbot_speed_yaw_pid, PID_POSITION, aimbot_speed_yaw_pid, AIMBOT_YAW_SPEED_PID_MAX_OUT, AIMBOT_YAW_SPEED_PID_MAX_IOUT);
-	//³õÊ¼»¯Ò£¿ØÆ÷ÍÓÂÝÒÇyawÖáPID
+	//ï¿½ï¿½Ê¼ï¿½ï¿½Ò£ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½yawï¿½ï¿½PID
 	gimbal_PID_init(&gimbal_task_init->gimbal_angle_yaw_ins_pid, YAW_INS_ANGLE_PID_MAX_OUT, YAW_INS_ANGLE_PID_MAX_IOUT, YAW_INS_ANGLE_PID_KP, YAW_INS_ANGLE_PID_KI, YAW_INS_ANGLE_PID_KD);
 	PID_init(&gimbal_task_init->gimbal_speed_yaw_ins_pid, PID_POSITION, gimbal_speed_yaw_ins_pid, YAW_INS_SPEED_PID_MAX_OUT, YAW_INS_SPEED_PID_MAX_IOUT);
-	//³õÊ¼»¯Ò£¿ØÆ÷ÍÓÂÝÒÇpitchÖáPID
+	//ï¿½ï¿½Ê¼ï¿½ï¿½Ò£ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½pitchï¿½ï¿½PID
 	gimbal_PID_init(&gimbal_task_init->gimbal_angle_pitch_ins_pid, PITCH_INS_ANGLE_PID_MAX_OUT, PITCH_INS_ANGLE_PID_MAX_IOUT, PITCH_INS_ANGLE_PID_KP, PITCH_INS_ANGLE_PID_KI, PITCH_INS_ANGLE_PID_KD);
 	PID_init(&gimbal_task_init->gimbal_speed_pitch_ins_pid, PID_POSITION, gimbal_speed_pitch_ins_pid, PITCH_INS_SPEED_PID_MAX_OUT, PITCH_INS_SPEED_PID_MAX_IOUT);
 
-	//ÏÈ°Ñµ±Ç°×ËÌ¬¶Á½øÀ´, Ä¿±ê½Ç¶È¶ÔÆëµ±Ç°½Ç¶È, ·ÀÖ¹¿ª»úµÚÒ»Ö¡ÃÍ³åÒ»ÏÂ
+	// trigger / friction wheel speed loop PID init
+	const static fp32 gimbal_speed_trigger_pid[3] = {TRIGGER_SPEED_PID_KP, TRIGGER_SPEED_PID_KI, TRIGGER_SPEED_PID_KD};
+	const static fp32 gimbal_speed_fric_pid[3] = {FRIC_SPEED_PID_KP, FRIC_SPEED_PID_KI, FRIC_SPEED_PID_KD};
+	PID_init(&gimbal_task_init->gimbal_speed_trigger_pid, PID_POSITION, gimbal_speed_trigger_pid, TRIGGER_SPEED_PID_MAX_OUT, TRIGGER_SPEED_PID_MAX_IOUT);
+	for(int i = 0; i < 2; i++)
+	{
+		PID_init(&gimbal_task_init->gimbal_speed_fric_pid[i], PID_POSITION, gimbal_speed_fric_pid, FRIC_SPEED_PID_MAX_OUT, FRIC_SPEED_PID_MAX_IOUT);
+	}
+
+	//ï¿½È°Ñµï¿½Ç°ï¿½ï¿½Ì¬ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½, Ä¿ï¿½ï¿½Ç¶È¶ï¿½ï¿½ëµ±Ç°ï¿½Ç¶ï¿½, ï¿½ï¿½Ö¹ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ò»Ö¡ï¿½Í³ï¿½Ò»ï¿½ï¿½
 	gimbal_task_init->ins_data.roll = gimbal_task_init->gimbal_INT_angle_point[ROLL_CHANNEL];
 	gimbal_task_init->ins_data.pitch = gimbal_task_init->gimbal_INT_angle_point[PITCH_CHANNEL];
 	gimbal_task_init->ins_data.yaw = gimbal_task_init->gimbal_INT_angle_point[YAW_CHANNEL];
@@ -174,7 +220,7 @@ void gimbal_init(gimbal_control_t *gimbal_task_init)
 }
 
 
-//ÔÆÌ¨Ä£Ê½Éè¶¨: Ö»Çø·Ö ÎÞÁ¦ / Ò£¿ØÆ÷ / ÊÓ¾õÉÏÎ»»ú
+//ï¿½ï¿½Ì¨Ä£Ê½ï¿½è¶¨: Ö»ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ / Ò£ï¿½ï¿½ï¿½ï¿½ / ï¿½Ó¾ï¿½ï¿½ï¿½Î»ï¿½ï¿½
 void gimbal_set_mode(gimbal_control_t *gimbal_mode_set)
 {
 	if (gimbal_mode_set == NULL)
@@ -182,20 +228,20 @@ void gimbal_set_mode(gimbal_control_t *gimbal_mode_set)
         return;
     }
 
-	//CH1ÏÂ = ÔÆÌ¨ÎÞÁ¦, ÆäÓà×éºÏ = Ò£¿ØÆ÷¿ØÖÆ
+	//CH1ï¿½ï¿½ = ï¿½ï¿½Ì¨ï¿½ï¿½ï¿½ï¿½, ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ = Ò£ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
 	if (switch_is_down(gimbal_mode_set->gimbal_rc_ctrl->rc.s[CHASSIS_MODE_CHANNEL_1]))
 	{
-		//ÔÆÌ¨ÎÞÁ¦
+		//ï¿½ï¿½Ì¨ï¿½ï¿½ï¿½ï¿½
 		gimbal_mode_set->gimbal_mode = CHASSIS_NO_MOVE;
 	}
 	else
 	{
-		//ÔÆÌ¨ÍÓÂÝÒÇ¿ØÖÆ
+		//ï¿½ï¿½Ì¨ï¿½ï¿½ï¿½ï¿½ï¿½Ç¿ï¿½ï¿½ï¿½
 		gimbal_mode_set->gimbal_mode = CHASSIS_FOLLOW_INS_YAW;
 	}
 
-	//ÊÓ¾õÉÏÎ»»ú½Ó¹ÜµÄÌõ¼þ: ¿ª¹Ø²¦µ½×ÔÃéÎ»(CH1ÉÏ+CH2ÉÏ) ÇÒ ÉÏÎ»»úÒªÇó½Ó¹Ü(control=1)
-	//Á½¸öÌõ¼þÍ¬Ê±³ÉÁ¢²Å½Ó¹Ü, ±£Ö¤ÈÎºÎÊ±ºò²¦Ò»ÏÂ¿ª¹Ø¾ÍÄÜÓÃÒ£¿ØÆ÷¶á»Ø¿ØÖÆÈ¨
+	//ï¿½Ó¾ï¿½ï¿½ï¿½Î»ï¿½ï¿½ï¿½Ó¹Üµï¿½ï¿½ï¿½ï¿½ï¿½: ï¿½ï¿½ï¿½Ø²ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Î»(CH1ï¿½ï¿½+CH2ï¿½ï¿½) ï¿½ï¿½ ï¿½ï¿½Î»ï¿½ï¿½Òªï¿½ï¿½Ó¹ï¿½(control=1)
+	//ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Í¬Ê±ï¿½ï¿½ï¿½ï¿½ï¿½Å½Ó¹ï¿½, ï¿½ï¿½Ö¤ï¿½Îºï¿½Ê±ï¿½ï¿½Ò»ï¿½Â¿ï¿½ï¿½Ø¾ï¿½ï¿½ï¿½ï¿½ï¿½Ò£ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ø¿ï¿½ï¿½ï¿½È¨
 	if (switch_is_up(gimbal_mode_set->gimbal_rc_ctrl->rc.s[CHASSIS_MODE_CHANNEL_1]) &&
 		switch_is_up(gimbal_mode_set->gimbal_rc_ctrl->rc.s[CHASSIS_MODE_CHANNEL_2]) &&
 		get_vision_cmd_point()->control)
@@ -207,7 +253,52 @@ void gimbal_set_mode(gimbal_control_t *gimbal_mode_set)
 		gimbal_mode_set->aimbot_mode = AIMBOT_OFF;
 	}
 
-	//°Ñµ±Ç°µÄÔÆÌ¨Ä£Ê½Í¬²½¸øÉÏÎ»»ú
+	//ï¿½Ñµï¿½Ç°ï¿½ï¿½ï¿½ï¿½Ì¨Ä£Ê½Í¬ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Î»ï¿½ï¿½
+	// read dial (encoding switch) value from RC channel
+	gimbal_mode_set->shoot_switch.encoding_switch_ecd = gimbal_mode_set->gimbal_rc_ctrl->rc.ch[SHOOT_MODE_CHANNEL];
+
+	// NO_MOVE: stop friction wheels and shooting
+	if(gimbal_mode_set->gimbal_mode == CHASSIS_NO_MOVE)
+	{
+		gimbal_mode_set->shoot_switch.fric_mode = FRIC_STOP;
+		gimbal_mode_set->shoot_switch.fric_flag = FRIC_STOP;
+		gimbal_mode_set->shoot_switch.shoot_mode = SHOOT_STOP;
+	}
+
+	// dial toggles friction wheels on/off (debounced)
+	static uint16_t shoot_i;
+	if((gimbal_mode_set->shoot_switch.fric_mode == FRIC_STOP) && (gimbal_mode_set->shoot_switch.fric_flag == FRIC_READY) && (gimbal_mode_set->shoot_switch.encoding_switch_ecd<=-400))
+	{
+		shoot_i++;
+		if(shoot_i >= FRIC_INSURANCE_RC)
+		{
+			gimbal_mode_set->shoot_switch.fric_mode = FRIC_START;
+			gimbal_mode_set->shoot_switch.fric_flag = FRIC_START;
+			shoot_i=0;
+		}
+	}
+	else if((gimbal_mode_set->shoot_switch.fric_mode == FRIC_START) && (gimbal_mode_set->shoot_switch.fric_flag == FRIC_READY) && (gimbal_mode_set->shoot_switch.encoding_switch_ecd<=-400))
+	{
+		gimbal_mode_set->shoot_switch.fric_mode = FRIC_STOP;
+		gimbal_mode_set->shoot_switch.fric_flag = FRIC_STOP;
+	}
+	else if(ABS(gimbal_mode_set->shoot_switch.encoding_switch_ecd)<10)
+	{
+		gimbal_mode_set->shoot_switch.fric_flag = FRIC_READY;
+	}
+
+	// dial selects shoot mode
+	if(gimbal_mode_set->shoot_switch.encoding_switch_ecd>200&&gimbal_mode_set->shoot_switch.encoding_switch_ecd<450)
+		gimbal_mode_set->shoot_switch.shoot_mode = SHOOT_SINGLE_START;
+	else if(gimbal_mode_set->shoot_switch.encoding_switch_ecd>450)
+		gimbal_mode_set->shoot_switch.shoot_mode = SHOOT_CONTINUOUS_START;
+	else
+		gimbal_mode_set->shoot_switch.shoot_mode = SHOOT_STOP;
+
+	// è§†è§‰è‡ªåŠ¨å¼€ç«: ä¼˜å…ˆçº§æœ€é«˜, è¦†ç›–æ‹¨ç è½®æ‰‹åŠ¨å‘å¼¹; ä»…è‡ªçž„æŽ¥ç®¡ + æ‘©æ“¦è½®å·²å¯åŠ¨æ—¶ç”Ÿæ•ˆ
+	if(get_vision_cmd_point()->shoot && gimbal_mode_set->aimbot_mode == AIMBOT_ON && gimbal_mode_set->shoot_switch.fric_mode == FRIC_START)
+		gimbal_mode_set->shoot_switch.shoot_mode = SHOOT_CONTINUOUS_START;
+
 	aimbot_mode_set(gimbal_mode_set->aimbot_mode);
 }
 
@@ -218,25 +309,34 @@ void gimbal_feedback_update(gimbal_control_t *gimbal_task_update)
     {
         return;
     }
-	//»ñÈ¡ÍÓÂÝÒÇÊý¾Ý
+	//ï¿½ï¿½È¡ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
 	gimbal_task_update->ins_data.roll = gimbal_task_update->gimbal_INT_angle_point[ROLL_CHANNEL];
 	gimbal_task_update->ins_data.pitch = gimbal_task_update->gimbal_INT_angle_point[PITCH_CHANNEL];
 	gimbal_task_update->ins_data.yaw = gimbal_task_update->gimbal_INT_angle_point[YAW_CHANNEL] - gimbal_task_update->gimbal_yaw_motor.gimbal_motor_measure->speed_rpm*GIMBAL_SPIN_YAW_BUFFER;
 	gimbal_ins_data_count(&gimbal_task_update->ins_data);
-	//¼ÆËãyawÖá6020Êý¾Ý
+	//ï¿½ï¿½ï¿½ï¿½yawï¿½ï¿½6020ï¿½ï¿½ï¿½ï¿½
 	gimbal_task_update->gimbal_yaw_motor.speed = gimbal_task_update->gimbal_yaw_motor.gimbal_motor_measure->speed_rpm;
 	gimbal_task_update->gimbal_yaw_motor.absolute_angle = gimbal_task_update->gimbal_yaw_motor.gimbal_motor_measure->ecd;
-	//¼ÆËãpitchÖá6020Êý¾Ý
+	//ï¿½ï¿½ï¿½ï¿½pitchï¿½ï¿½6020ï¿½ï¿½ï¿½ï¿½
 	gimbal_task_update->gimbal_pitch_motor.speed = gimbal_task_update->gimbal_pitch_motor.gimbal_motor_measure->speed_rpm;
 	gimbal_task_update->gimbal_pitch_motor.absolute_angle = gimbal_task_update->gimbal_pitch_motor.gimbal_motor_measure->ecd;
 
-	//ÍÓÂÝÒÇ½ÇËÙ¶È, Ö±½ÓÈ¡yawÖáºÍpitchÖáµÄ·ÖÁ¿
+	// trigger / friction wheel feedback
+	gimbal_task_update->gimbal_trigger_motor.speed = gimbal_task_update->gimbal_trigger_motor.shoot_motor_measure->speed_rpm;
+	gimbal_task_update->gimbal_trigger_motor.relative_angle = gimbal_task_update->gimbal_trigger_motor.shoot_motor_measure->ecd;
+	for(int i = 0; i < 2; i++)
+	{
+		gimbal_task_update->gimbal_fric_motor[i].speed = gimbal_task_update->gimbal_fric_motor[i].shoot_motor_measure->speed_rpm;
+		gimbal_task_update->gimbal_fric_motor[i].relative_angle = gimbal_task_update->gimbal_fric_motor[i].shoot_motor_measure->ecd;
+	}
+
+	//ï¿½ï¿½ï¿½ï¿½ï¿½Ç½ï¿½ï¿½Ù¶ï¿½, Ö±ï¿½ï¿½È¡yawï¿½ï¿½ï¿½pitchï¿½ï¿½Ä·ï¿½ï¿½ï¿½
 	gimbal_task_update->gimbal_yaw_motor.motor_gyro = *(gimbal_task_update->gimbal_INT_gyro_point + INS_GYRO_Z_ADDRESS_OFFSET);
 	gimbal_task_update->gimbal_pitch_motor.motor_gyro = *(gimbal_task_update->gimbal_INT_gyro_point + INS_GYRO_Y_ADDRESS_OFFSET);
 }
 
 
-//Ò£¿ØÆ÷¸øyaw,pitchÄ¿±ê¸³Öµ
+//Ò£ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½yaw,pitchÄ¿ï¿½ê¸³Öµ
 void gimbal_set_control(gimbal_control_t *gimbal_set_control_t)
 {
 	if (gimbal_set_control_t == NULL)
@@ -244,55 +344,80 @@ void gimbal_set_control(gimbal_control_t *gimbal_set_control_t)
         return;
     }
 
-	//Ö»ÓÐÒ£¿ØÆ÷¿ØÖÆµÄÊ±ºò²ÅÐèÒªËãÒ£¿ØÆ÷µÄÄ¿±êÖµ, ×ÔÃéµÄÄ¿±êÖµÓÉÉÏÎ»»úÖ±½Ó¸ø
+	//Ö»ï¿½ï¿½Ò£ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Æµï¿½Ê±ï¿½ï¿½ï¿½ï¿½ï¿½Òªï¿½ï¿½Ò£ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ä¿ï¿½ï¿½Öµ, ï¿½ï¿½ï¿½ï¿½ï¿½Ä¿ï¿½ï¿½Öµï¿½ï¿½ï¿½ï¿½Î»ï¿½ï¿½Ö±ï¿½Ó¸ï¿½
+	// fric wheel speed set
+	if(gimbal_set_control_t->shoot_switch.fric_mode == FRIC_START)
+	{
+		gimbal_set_control_t->gimbal_fric_motor[0].speed_set = FRIC_SHOOT_LEFT_SPEED;
+		gimbal_set_control_t->gimbal_fric_motor[1].speed_set = -FRIC_SHOOT_RIGHT_SPEED;
+	}
+	else if(gimbal_set_control_t->shoot_switch.fric_mode == FRIC_STOP)
+	{
+		gimbal_set_control_t->gimbal_fric_motor[0].speed_set = 0;
+		gimbal_set_control_t->gimbal_fric_motor[1].speed_set = 0;
+		gimbal_set_control_t->gimbal_trigger_motor.speed_set = 0;
+	}
+
+	// trigger shoot delay
+	if((gimbal_set_control_t->shoot_switch.shoot_mode == SHOOT_SINGLE_START) && (gimbal_set_control_t->shoot_switch.fric_mode == FRIC_START))
+		gimbal_set_control_t->gimbal_trigger_motor.shoot_delay = TRIGGER_SHOOT_SPEED_RATE_SLOW;
+	else if((gimbal_set_control_t->shoot_switch.shoot_mode == SHOOT_CONTINUOUS_START) && (gimbal_set_control_t->shoot_switch.fric_mode == FRIC_START))
+		gimbal_set_control_t->gimbal_trigger_motor.shoot_delay = TRIGGER_SHOOT_SPEED_RATE_FAST;
+	else if((gimbal_set_control_t->shoot_switch.shoot_mode == SHOOT_WITHOUT_CONTROL) && (gimbal_set_control_t->shoot_switch.fric_mode == FRIC_START))
+		gimbal_set_control_t->gimbal_trigger_motor.shoot_delay = TRIGGER_SHOOT_SPEED_RATE_FAST;
+	else
+		gimbal_set_control_t->gimbal_trigger_motor.shoot_delay = TRIGGER_SHOOT_STOP;
+
+	shoot_task(&gimbal_set_control_t->shoot_switch.trigger_state, gimbal_set_control_t->shoot_switch.shoot_mode, gimbal_set_control_t->shoot_switch.fric_mode, &gimbal_set_control_t->gimbal_trigger_motor.speed_set, gimbal_set_control_t->gimbal_trigger_motor.shoot_delay);
+
 	if(gimbal_set_control_t->gimbal_mode == CHASSIS_NO_MOVE || gimbal_set_control_t->aimbot_mode == AIMBOT_ON)
 	{
 		return;
 	}
 
-	//Ò£¿ØÆ÷Ò¡¸ËºÍÊó±ê¸øÄ¿±ê½Ç¶È
+	//Ò£ï¿½ï¿½ï¿½ï¿½Ò¡ï¿½Ëºï¿½ï¿½ï¿½ï¿½ï¿½Ä¿ï¿½ï¿½Ç¶ï¿½
 	gimbal_set_control_t->yaw_set = -(gimbal_set_control_t->gimbal_rc_ctrl->rc.ch[RC_YAW_CHANNEL] * GIMBAL_OPEN_RC_YAW_SEN + gimbal_set_control_t->gimbal_rc_ctrl->mouse.x*GIMBAL_OPEN_X_YAW_SEN);
-	//ËÀÇø, ·ÀÖ¹Ò¡¸Ë»ØÖÐ²»×¼µ¼ÖÂÆ¯ÒÆ
+	//ï¿½ï¿½ï¿½ï¿½, ï¿½ï¿½Ö¹Ò¡ï¿½Ë»ï¿½ï¿½Ð²ï¿½×¼ï¿½ï¿½ï¿½ï¿½Æ¯ï¿½ï¿½
 	if(gimbal_set_control_t->yaw_set<=25&&gimbal_set_control_t->yaw_set>=-25)
 		gimbal_set_control_t->yaw_set=0;
 	gimbal_set_control_t->pitch_set = (gimbal_set_control_t->gimbal_rc_ctrl->rc.ch[RC_PITCH_CHANNEL] * GIMBAO_OPEN_RC_PITCH_FAST_SEN - gimbal_set_control_t->gimbal_rc_ctrl->mouse.y*GIMBAL_OPEN_Y_PITCH_SEN);
 }
 
-//µ×ÅÌ¶æÏòÆð×ªÅÐ¶Ï
+//ï¿½ï¿½ï¿½Ì¶ï¿½ï¿½ï¿½ï¿½ï¿½×ªï¿½Ð¶ï¿½
 void gimbal_to_chassis_follow_yaw_determine(gimbal_control_t *gimbal_chassis_follow_yaw)
 {	
-	//µ×ÅÌ¸úËæÄ£Ê½¼ÆËã±àÂëÆ÷²îÖµ´«Èëµ×ÅÌ
+	//ï¿½ï¿½ï¿½Ì¸ï¿½ï¿½ï¿½Ä£Ê½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Öµï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
 	if(gimbal_chassis_follow_yaw->gimbal_yaw_motor.absolute_angle - M6020_GIMBAL_ANGLE_YAW != 0)
 		gimbal_chassis_follow_yaw->err_gimbal_chassis_ecd = gimbal_chassis_follow_yaw->gimbal_yaw_motor.absolute_angle - M6020_GIMBAL_ANGLE_YAW;
-	//ÓÅÁÓ»¡¼ÆËã
+	//ï¿½ï¿½ï¿½Ó»ï¿½ï¿½ï¿½ï¿½ï¿½
 	if(gimbal_chassis_follow_yaw->err_gimbal_chassis_ecd>HALF_ECD_RANGE)			
 		gimbal_chassis_follow_yaw->err_gimbal_chassis_ecd -= ECD_RANGE;
 	else if(gimbal_chassis_follow_yaw->err_gimbal_chassis_ecd<-HALF_ECD_RANGE)		
 		gimbal_chassis_follow_yaw->err_gimbal_chassis_ecd += ECD_RANGE;
-	//¹ý·ùÏÞÖÆ
+	//ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
 //	abs_limit(&gimbal_chassis_follow_yaw->err_gimbal_chassis_ecd, GIMBAO_TURN_LIMIT);
 	
 	
 		gimbal_chassis_follow_yaw->yaw = gimbal_chassis_follow_yaw->err_gimbal_chassis_ecd;
 }
 
-//Ò£¿ØÆ÷¿ØÖÆÔÆÌ¨yaw
+//Ò£ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ì¨yaw
 void gimbal_ins_yaw_control(gimbal_control_t *gimbal_ins)
 {
-	//Ò£¿ØÆ÷µÄ»ý·ÖÁ¿ÀÛ¼Ó, ÔÙµþ¼Óµ½ÍÓÂÝÒÇµ±Ç°½Ç¶ÈÉÏ
+	//Ò£ï¿½ï¿½ï¿½ï¿½ï¿½Ä»ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Û¼ï¿½, ï¿½Ùµï¿½ï¿½Óµï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Çµï¿½Ç°ï¿½Ç¶ï¿½ï¿½ï¿½
 	gimbal_ins->gimbal_yaw_motor.add += gimbal_ins->yaw_set*YAW_INS_OPEN_RC_YAW_SEN;
 	gimbal_ins->gimbal_yaw_motor.absolute_angle_set = gimbal_ins->ins_data.yaw_target + gimbal_ins->gimbal_yaw_motor.add;
 
-	//yawÖá½Ç¶È»·PID
+	//yawï¿½ï¿½Ç¶È»ï¿½PID
 	gimbal_ins->gimbal_yaw_motor.motor_gyro_set = gimbal_PID_calc(&gimbal_ins->gimbal_angle_yaw_ins_pid , gimbal_ins->ins_data.yaw,
 																			gimbal_ins->gimbal_yaw_motor.absolute_angle_set, gimbal_ins->gimbal_yaw_motor.motor_gyro);
-	//yawÖáËÙ¶È»·PID
+	//yawï¿½ï¿½ï¿½Ù¶È»ï¿½PID
 	gimbal_ins->gimbal_yaw_motor.current_set = PID_calc(&gimbal_ins->gimbal_speed_yaw_ins_pid, gimbal_ins->gimbal_yaw_motor.motor_gyro,
 																	gimbal_ins->gimbal_yaw_motor.motor_gyro_set);
 }
 
 
-//ÊÓ¾õÉÏÎ»»ú½Ó¹ÜÔÆÌ¨
+//ï¿½Ó¾ï¿½ï¿½ï¿½Î»ï¿½ï¿½ï¿½Ó¹ï¿½ï¿½ï¿½Ì¨
 static uint16_t gimbal_aimbot_delay;
 void aimbot_gimbal_control(gimbal_control_t *aimbot_gimbal_control_point)
 {
@@ -307,86 +432,106 @@ void aimbot_gimbal_control(gimbal_control_t *aimbot_gimbal_control_point)
 	if(gimbal_aimbot_delay < AIMBOT_INSURANCE)
 		return;
 
-	//pitch, ÉÏÎ»»ú¸øµÄÄ¿±ê¾ÍÊÇ¾ø¶Ô½Ç¶ÈÄ¿±ê
+	//pitch, ï¿½ï¿½Î»ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ä¿ï¿½ï¿½ï¿½ï¿½Ç¾ï¿½ï¿½Ô½Ç¶ï¿½Ä¿ï¿½ï¿½
 	aimbot_gimbal_control_point->gimbal_pitch_motor.absolute_angle_set = aimbot_gimbal_control_point->gimbal_aimbot_point->target_pitch;
-	//»úÐµÏÞÎ»±£»¤, ·ÀÖ¹×²ÏÞÎ»
+	//ï¿½ï¿½Ðµï¿½ï¿½Î»ï¿½ï¿½ï¿½ï¿½, ï¿½ï¿½Ö¹×²ï¿½ï¿½Î»
 	gimbal_limit(&aimbot_gimbal_control_point->gimbal_pitch_motor.absolute_angle_set, PITCH_INS_MAX, PITCH_INS_MIN);
-	//pitchÖá½Ç¶È»·PID
+	//pitchï¿½ï¿½Ç¶È»ï¿½PID
 	aimbot_gimbal_control_point->gimbal_pitch_motor.motor_gyro_set = gimbal_PID_calc(&aimbot_gimbal_control_point->aimbot_angle_pitch_pid , aimbot_gimbal_control_point->ins_data.pitch,
 																			aimbot_gimbal_control_point->gimbal_pitch_motor.absolute_angle_set, aimbot_gimbal_control_point->gimbal_pitch_motor.motor_gyro);
-	//pitchÖáËÙ¶È»·PID
+	//pitchï¿½ï¿½ï¿½Ù¶È»ï¿½PID
 	aimbot_gimbal_control_point->gimbal_pitch_motor.current_set = PID_calc(&aimbot_gimbal_control_point->aimbot_speed_pitch_pid, aimbot_gimbal_control_point->gimbal_pitch_motor.motor_gyro,
 																			aimbot_gimbal_control_point->gimbal_pitch_motor.motor_gyro_set);
 
-	//yaw, ÉÏÎ»»ú¸øµÄÄ¿±ê¾ÍÊÇ¾ø¶Ô½Ç¶ÈÄ¿±ê
+	//yaw, ï¿½ï¿½Î»ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ä¿ï¿½ï¿½ï¿½ï¿½Ç¾ï¿½ï¿½Ô½Ç¶ï¿½Ä¿ï¿½ï¿½
 	aimbot_gimbal_control_point->gimbal_yaw_motor.absolute_angle_set = aimbot_gimbal_control_point->gimbal_aimbot_point->target_yaw;
 	aimbot_gimbal_control_point->gimbal_yaw_motor.absolute_angle_set = loop_fp32_constrain(aimbot_gimbal_control_point->gimbal_yaw_motor.absolute_angle_set, -PI, PI);
-	//yawÖá½Ç¶È»·PID
+	//yawï¿½ï¿½Ç¶È»ï¿½PID
 	aimbot_gimbal_control_point->gimbal_yaw_motor.motor_gyro_set = gimbal_PID_calc(&aimbot_gimbal_control_point->aimbot_angle_yaw_pid , aimbot_gimbal_control_point->gimbal_INT_angle_point[YAW_CHANNEL] - aimbot_gimbal_control_point->gimbal_yaw_motor.gimbal_motor_measure->speed_rpm*GIMBAL_SPIN_YAW_BUFFER,
 																				aimbot_gimbal_control_point->gimbal_yaw_motor.absolute_angle_set, aimbot_gimbal_control_point->gimbal_yaw_motor.motor_gyro);
-	//yawÖáËÙ¶È»·PID
+	//yawï¿½ï¿½ï¿½Ù¶È»ï¿½PID
 	aimbot_gimbal_control_point->gimbal_yaw_motor.current_set = PID_calc(&aimbot_gimbal_control_point->aimbot_speed_yaw_pid, aimbot_gimbal_control_point->gimbal_yaw_motor.motor_gyro,
 																				aimbot_gimbal_control_point->gimbal_yaw_motor.motor_gyro_set);
 }
 
 
-//Ò£¿ØÆ÷¿ØÖÆÔÆÌ¨pitch
+//Ò£ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ì¨pitch
 void pitch_ins_PID_control(gimbal_control_t *pitch_ins_control)
 {
-	//ÔÚ»úÐµÐÐ³ÌÄÚ²ÅÔÊÐí¼ÌÐø»ý·Ö
+	//ï¿½Ú»ï¿½Ðµï¿½Ð³ï¿½ï¿½Ú²ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
 	if(pitch_ins_control->gimbal_pitch_motor.absolute_angle_set < PITCH_INS_MAX && pitch_ins_control->gimbal_pitch_motor.absolute_angle_set > PITCH_INS_MIN)
 		pitch_ins_control->gimbal_pitch_motor.add += pitch_ins_control->pitch_set*GIMBAL_PITCH_INS_RATE;
 	pitch_ins_control->gimbal_pitch_motor.absolute_angle_set = pitch_ins_control->gimbal_pitch_motor.add + pitch_ins_control->ins_data.pitch_target;
-	//pitch»úÐµÏÞÎ»
+	//pitchï¿½ï¿½Ðµï¿½ï¿½Î»
 	gimbal_limit(&pitch_ins_control->gimbal_pitch_motor.absolute_angle_set, PITCH_INS_MAX, PITCH_INS_MIN);
 
-	//pitchÖá½Ç¶È»·PID
+	//pitchï¿½ï¿½Ç¶È»ï¿½PID
 	pitch_ins_control->gimbal_pitch_motor.motor_gyro_set = gimbal_PID_calc(&pitch_ins_control->gimbal_angle_pitch_ins_pid , pitch_ins_control->ins_data.pitch,
 																			pitch_ins_control->gimbal_pitch_motor.absolute_angle_set, pitch_ins_control->gimbal_pitch_motor.motor_gyro);
-	//pitchÖáËÙ¶È»·PID
+	//pitchï¿½ï¿½ï¿½Ù¶È»ï¿½PID
 	pitch_ins_control->gimbal_pitch_motor.current_set = PID_calc(&pitch_ins_control->gimbal_speed_pitch_ins_pid, pitch_ins_control->gimbal_pitch_motor.motor_gyro,
 																	pitch_ins_control->gimbal_pitch_motor.motor_gyro_set);
 }
 
 
+void fric_motor_PID_control(gimbal_control_t *fric_motore_control)
+{
+	for(int i = 0; i < 2; i++)
+	{
+		fric_motore_control->gimbal_fric_motor[i].current_set = PID_calc(&fric_motore_control->gimbal_speed_fric_pid[i], fric_motore_control->gimbal_fric_motor[i].speed, fric_motore_control->gimbal_fric_motor[i].speed_set);
+		fric_motore_control->gimbal_fric_motor[i].give_current = fric_motore_control->gimbal_fric_motor[i].current_set;
+	}
+}
+
+void trigger_motor_PID_control(gimbal_control_t *trigger_motore_control)
+{
+	trigger_motore_control->gimbal_trigger_motor.target_ecd += trigger_motore_control->gimbal_trigger_motor.speed_set;
+	trigger_motore_control->gimbal_trigger_motor.current_set = PID_calc(&trigger_motore_control->gimbal_speed_trigger_pid, trigger_motore_control->gimbal_trigger_motor.speed, trigger_motore_control->gimbal_trigger_motor.speed_set);
+	trigger_motore_control->gimbal_trigger_motor.give_current = trigger_motore_control->gimbal_trigger_motor.current_set;
+}
+
 void gimbal_control_loop(gimbal_control_t *gimbal_control_loop_t)
 {
 	static uint8_t aimbot_last_mode = AIMBOT_OFF;
-	//ËãÔÆÌ¨ºÍµ×ÅÌµÄ²îÖµ, ¸øµ×ÅÌ¸úËæÓÃ
+	//ï¿½ï¿½ï¿½ï¿½Ì¨ï¿½Íµï¿½ï¿½ÌµÄ²ï¿½Öµ, ï¿½ï¿½ï¿½ï¿½ï¿½Ì¸ï¿½ï¿½ï¿½ï¿½ï¿½
 	gimbal_to_chassis_follow_yaw_determine(gimbal_control_loop_t);
 
-	//ÎÞÁ¦, »òÕß±»ÊÓ¾õ½Ó¹ÜµÄÊ±ºò, Ò£¿ØÆ÷µÄ»ý·ÖÁ¿ÇåÁã
-		// ÊÓ¾õ·ÅÊÖÄÇÒ»Ë²¼äÒ²ÒªÖØËøÄ¿±ê½Ç, ·ñÔòÊÖ¶¯»·»á°ÑÔÆÌ¨À­»Ø¿ª»úËø´æ½Ç¶È
+	//ï¿½ï¿½ï¿½ï¿½, ï¿½ï¿½ï¿½ß±ï¿½ï¿½Ó¾ï¿½ï¿½Ó¹Üµï¿½Ê±ï¿½ï¿½, Ò£ï¿½ï¿½ï¿½ï¿½ï¿½Ä»ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
+		// ï¿½Ó¾ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ò»Ë²ï¿½ï¿½Ò²Òªï¿½ï¿½ï¿½ï¿½Ä¿ï¿½ï¿½ï¿½, ï¿½ï¿½ï¿½ï¿½ï¿½Ö¶ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ì¨ï¿½ï¿½ï¿½Ø¿ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ç¶ï¿½
 	if(gimbal_control_loop_t->gimbal_mode == CHASSIS_NO_MOVE ||
 	   gimbal_control_loop_t->aimbot_mode == AIMBOT_ON ||
 	   aimbot_last_mode == AIMBOT_ON)
 	{
 		gimbal_control_loop_t->gimbal_yaw_motor.add = 0;
 		gimbal_control_loop_t->gimbal_pitch_motor.add = 0;
-		//°ÑÒ£¿ØÆ÷µÄtargetÖµÍ¬²½µ½µ±Ç°½Ç¶È, ÇÐ»ØÒ£¿ØÆ÷µÄÊ±ºò²»»áÌø×ªÍ·
+		//ï¿½ï¿½Ò£ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½targetÖµÍ¬ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ç°ï¿½Ç¶ï¿½, ï¿½Ð»ï¿½Ò£ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ê±ï¿½ò²»»ï¿½ï¿½ï¿½×ªÍ·
 		gimbal_control_loop_t->ins_data.yaw_target = gimbal_control_loop_t->ins_data.yaw;
 		gimbal_control_loop_t->ins_data.pitch_target = gimbal_control_loop_t->ins_data.pitch;
 	}
 	aimbot_last_mode = gimbal_control_loop_t->aimbot_mode;
 
 
-	//ÏÔÊ½¶þÑ¡Ò»: ÊÓ¾õÉÏÎ»»ú½Ó¹Ü »¹ÊÇ Ò£¿ØÆ÷½Ó¹Ü
+	//ï¿½ï¿½Ê½ï¿½ï¿½Ñ¡Ò»: ï¿½Ó¾ï¿½ï¿½ï¿½Î»ï¿½ï¿½ï¿½Ó¹ï¿½ ï¿½ï¿½ï¿½ï¿½ Ò£ï¿½ï¿½ï¿½ï¿½ï¿½Ó¹ï¿½
 	if(gimbal_control_loop_t->aimbot_mode == AIMBOT_ON)
 	{
-		//ÊÓ¾õÉÏÎ»»ú¿ØÖÆÔÆÌ¨
+		//ï¿½Ó¾ï¿½ï¿½ï¿½Î»ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ì¨
 		aimbot_gimbal_control(gimbal_control_loop_t);
 	}
 	else
 	{
-		//Ò£¿ØÆ÷¿ØÖÆÔÆÌ¨
+		//Ò£ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ì¨
 		gimbal_ins_yaw_control(gimbal_control_loop_t);
 		pitch_ins_PID_control(gimbal_control_loop_t);
 	}
 
-	//ÔÆÌ¨yawÖá×îÖÕÊä³öµçÁ÷
+	//ï¿½ï¿½Ì¨yawï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
 	gimbal_control_loop_t->gimbal_yaw_motor.give_current = gimbal_control_loop_t->gimbal_yaw_motor.current_set;
-	//ÔÆÌ¨pitchÖá×îÖÕÊä³öµçÁ÷
+	//ï¿½ï¿½Ì¨pitchï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
 	gimbal_control_loop_t->gimbal_pitch_motor.give_current = gimbal_control_loop_t->gimbal_pitch_motor.current_set;
+
+	// trigger / friction wheel PID control
+	fric_motor_PID_control(gimbal_control_loop_t);
+	trigger_motor_PID_control(gimbal_control_loop_t);
 }
 
 
@@ -397,9 +542,9 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 
 
 /**
-  * @brief          »ñÈ¡ÔÆÌ¨¿ØÖÆÖ¸Õë
+  * @brief          ï¿½ï¿½È¡ï¿½ï¿½Ì¨ï¿½ï¿½ï¿½ï¿½Ö¸ï¿½ï¿½
   * @param[in]      none
-  * @retval         »ñÈ¡ÔÆÌ¨¿ØÖÆÖ¸Õë
+  * @retval         ï¿½ï¿½È¡ï¿½ï¿½Ì¨ï¿½ï¿½ï¿½ï¿½Ö¸ï¿½ï¿½
   */
 const gimbal_control_t *get_gimbal_move_point(void)
 {

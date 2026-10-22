@@ -7,90 +7,91 @@
 #include "pid.h"
 #include "remote_control.h"
 #include "aimbot_task.h"
+#include "shoot.h"
 
-//=====================================================
-// ÔÆÌ¨Ö»×öÈý¼þÊÂ: µç»úPID±Õ»· / Ò£¿ØÆ÷¿ØÖÆ / ÊÓ¾õÉÏÎ»»ú¿ØÖÆ
-// ·¢Éä, µ¯²Õ, ¼¤¹â, ¼üÅÌÏà¹Ø´úÂëÈ«²¿É¾³ý
-//=====================================================
+#define ABS(x) (((x)>0)?(x):(-(x)))
 
-//ÈÎÎñ³õÊ¼»¯ ¿ÕÏÐÒ»¶ÎÊ±¼ä
+
+
+//ï¿½ï¿½ï¿½ï¿½ï¿½Ê¼ï¿½ï¿½ 
 #define GIMBAL_TASK_INIT_TIME 500
 
 #define GIMBAL_CONTROL_TIME 1
-//Ð¡ÍÓÂÝÔÆÌ¨yawÖá²¹³¥
+//Ð¡ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ì¨yawï¿½á²¹ï¿½ï¿½
 #define GIMBAL_SPIN_YAW_BUFFER	0.0005f
 
-//Ò£¿ØÆ÷ ÁéÃô¶È
-#define GIMBAL_OPEN_RC_YAW_SEN		3.0f		//Ó°Ïì±àÂëÆ÷µ×ÅÌ¸úËæÄ£Ê½ÏÂµÄ×î´óÆ«×ª½Ç¶È
+//Ò£ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
+#define GIMBAL_OPEN_RC_YAW_SEN		3.0f		//Ó°ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ì¸ï¿½ï¿½ï¿½Ä£Ê½ï¿½Âµï¿½ï¿½ï¿½ï¿½Æ«×ªï¿½Ç¶ï¿½
 #define GIMBAO_OPEN_RC_PITCH_FAST_SEN	1.70f		//0.0024f
-//ÍÓÂÝÒÇPITCHÖá×ª»»±ÈÀý
+//ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½PITCHï¿½ï¿½×ªï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
 #define GIMBAL_PITCH_INS_RATE			0.0000013f
-//ÍÓÂÝÒÇyawÖáÁéÃô¶È
-#define YAW_INS_OPEN_RC_YAW_SEN		0.000002f			//ÍÓÂÝÒÇÄ£Ê½ÁéÃô¶È
-//Êó±ê	ÁéÃô¶È
+//ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½yawï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
+#define YAW_INS_OPEN_RC_YAW_SEN		0.000002f			//ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ä£Ê½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
+//ï¿½ï¿½ï¿½	ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
 #define GIMBAL_OPEN_X_YAW_SEN		27.0f
 #define GIMBAL_OPEN_Y_PITCH_SEN		27.0f
-//yaw,pitch¿ØÖÆÍ¨µÀÒÔ¼°×´Ì¬¿ª¹ØÍ¨µÀ
+//yaw,pitchï¿½ï¿½ï¿½ï¿½Í¨ï¿½ï¿½ï¿½Ô¼ï¿½×´Ì¬ï¿½ï¿½ï¿½ï¿½Í¨ï¿½ï¿½
 #define RC_YAW_CHANNEL   0
 #define RC_PITCH_CHANNEL 1
+#define SHOOT_MODE_CHANNEL 4
 
-//yawÖáÆðÊ¼Î»ÖÃ
+//yawï¿½ï¿½ï¿½ï¿½Ê¼Î»ï¿½ï¿½
 #define M6020_GIMBAL_ANGLE_YAW			   354//1394
 #define PITCH_INS_MAX				0.483058602f//0.5f
 #define PITCH_INS_MIN				-0.404820025f//0.25f
 
-//=================== PID ²ÎÊý ===================
-//aimbot pitch½Ç¶È»·PID
+//=================== PID ï¿½ï¿½ï¿½ï¿½ ===================
+//aimbot pitchï¿½Ç¶È»ï¿½PID
 #define AIMBOT_PITCH_ANGLE_PID_KP        	25.0f	//25000.0f
 #define AIMBOT_PITCH_ANGLE_PID_KI        	0.0f   //0.0f
 #define AIMBOT_PITCH_ANGLE_PID_KD        	0.0f 	//200000.0f
-// ×ÔÃéÏÞËÙÔ­À´²»ÏÞËÙ»á¹ý³åË¦³ö»­Ãæ pitch(rad/s), 10000 = ²»ÏÞËÙ
-#define AIMBOT_PITCH_ANGLE_PID_MAX_OUT   	2.5f   //300000.0f
+// ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ô­ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ù»ï¿½ï¿½ï¿½ï¿½Ë¦ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ pitch(rad/s), 10000 = ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
+#define AIMBOT_PITCH_ANGLE_PID_MAX_OUT   	5//2.5f   //300000.0f
 #define AIMBOT_PITCH_ANGLE_PID_MAX_IOUT  	50.0f   //50.	0f
                                              
-//aimbot pitchËÙ¶È»· PID                                          
-#define AIMBOT_PITCH_SPEED_PID_KP        	4500.0f   //2.4f
+//aimbot pitchï¿½Ù¶È»ï¿½ PID                                          
+#define AIMBOT_PITCH_SPEED_PID_KP        	7000.0f//4500.0f   //2.4f
 #define AIMBOT_PITCH_SPEED_PID_KI        	0.0f   //0.0f
-#define AIMBOT_PITCH_SPEED_PID_KD        	20.0f   //200.0f
+#define AIMBOT_PITCH_SPEED_PID_KD        	40.0f   //200.0f
 #define AIMBOT_PITCH_SPEED_PID_MAX_OUT   	30000.0f   //10000.0f
 #define AIMBOT_PITCH_SPEED_PID_MAX_IOUT  	1000.0f   //1000.0f
                                             
-//aimbot yaw½Ç¶È»·PID                         
-#define AIMBOT_YAW_ANGLE_PID_KP        				5.0f  //8000.0f	//25000.0f
+//aimbot yawï¿½Ç¶È»ï¿½PID                         
+#define AIMBOT_YAW_ANGLE_PID_KP        				25.0f  //8000.0f	//25000.0f
 #define AIMBOT_YAW_ANGLE_PID_KI        				0.0f  //0.0f   //0.0f
 #define AIMBOT_YAW_ANGLE_PID_KD        				0.0f  //2000.0f 	//200000.0f
 #define AIMBOT_YAW_ANGLE_PID_MAX_OUT   				20000.0f   //300000.0f
 #define AIMBOT_YAW_ANGLE_PID_MAX_IOUT  				30.0f   //50.0f
                                                      
-//aimbot yawËÙ¶È»· PID                                                  
-#define AIMBOT_YAW_SPEED_PID_KP        				1200.0f  //50000.0f   //2.4f
+//aimbot yawï¿½Ù¶È»ï¿½ PID                                                  
+#define AIMBOT_YAW_SPEED_PID_KP        				5000.0f//1200.0f  //50000.0f   //2.4f
 #define AIMBOT_YAW_SPEED_PID_KI        				0.0f  //0.0f   //0.0f
 #define AIMBOT_YAW_SPEED_PID_KD        				0.0f  //20.0f   //200.0f
 #define AIMBOT_YAW_SPEED_PID_MAX_OUT   				30000.0f   //10000.0f
 #define AIMBOT_YAW_SPEED_PID_MAX_IOUT  				1000.0f   //1000.0f
                                             
-//ÍÓÂÝÒÇyaw ½Ç¶È»· PID                              
+//ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½yaw ï¿½Ç¶È»ï¿½ PID                              
 #define YAW_INS_ANGLE_PID_KP       		 		5.0f	//25000.0f
 #define YAW_INS_ANGLE_PID_KI       				0.0f   //0.0f
 #define YAW_INS_ANGLE_PID_KD        			0.0f 	//200000.0f
 #define YAW_INS_ANGLE_PID_MAX_OUT   			300000.0f   //300000.0f
 #define YAW_INS_ANGLE_PID_MAX_IOUT  			30.0f   //50.0f
                                                  
-//ÍÓÂÝÒÇyaw ËÙ¶È»· PID                                             
+//ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½yaw ï¿½Ù¶È»ï¿½ PID                                             
 #define YAW_INS_SPEED_PID_KP        		  2000.0f//24000.0f   
 #define YAW_INS_SPEED_PID_KI        			0.0f   //0.0f
 #define YAW_INS_SPEED_PID_KD        			0.0f   //200.0f
 #define YAW_INS_SPEED_PID_MAX_OUT   			30000.0f   //10000.0f
 #define YAW_INS_SPEED_PID_MAX_IOUT  			1000.0f   //1000.0f
                                             
-//ÍÓÂÝÒÇpitch ½Ç¶È»· PID                              
+//ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½pitch ï¿½Ç¶È»ï¿½ PID                              
 #define PITCH_INS_ANGLE_PID_KP       		 	25.0f	//25000.0f
 #define PITCH_INS_ANGLE_PID_KI       			0.0f   //0.0f
 #define PITCH_INS_ANGLE_PID_KD        			0.0f 	//200000.0f
 #define PITCH_INS_ANGLE_PID_MAX_OUT   			300000.0f   //300000.0f
 #define PITCH_INS_ANGLE_PID_MAX_IOUT  			50.0f   //50.	0f
                                                  
-//ÍÓÂÝÒÇpitch ËÙ¶È»· PID                                             
+//ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½pitch ï¿½Ù¶È»ï¿½ PID                                             
 #define PITCH_INS_SPEED_PID_KP        			4500    //11500.0f   
 #define PITCH_INS_SPEED_PID_KI        			0.0f   //0.0f
 #define PITCH_INS_SPEED_PID_KD        			20.0f   //200.0f
@@ -117,67 +118,74 @@ typedef struct
     fp32 out;
 } gimbal_PID_t;
 
-//ÔÆÌ¨µç»ú
+//ï¿½ï¿½Ì¨ï¿½ï¿½ï¿½
 typedef struct
 {
 	const motor_measure_t *gimbal_motor_measure;
 
-	fp32 add;				//Ò£¿ØÆ÷»ý·ÖÁ¿
-	fp32 absolute_angle;	//rad, ±àÂëÆ÷¾ø¶Ô½Ç¶È
-	fp32 absolute_angle_set;//rad, Ä¿±ê¾ø¶Ô½Ç¶È
-	fp32 motor_gyro;		//rad/s, ÍÓÂÝÒÇ½ÇËÙ¶È
+	fp32 add;				//Ò£ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
+	fp32 absolute_angle;	//rad, ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ô½Ç¶ï¿½
+	fp32 absolute_angle_set;//rad, Ä¿ï¿½ï¿½ï¿½ï¿½Ô½Ç¶ï¿½
+	fp32 motor_gyro;		//rad/s, ï¿½ï¿½ï¿½ï¿½ï¿½Ç½ï¿½ï¿½Ù¶ï¿½
 	fp32 motor_gyro_set;
 	fp32 speed;				//rpm
 	fp32 current_set;
 	int16_t give_current;
 } gimbal_motor_t;
 
-//ÍÓÂÝÒÇÊý¾Ý
+//ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
 typedef struct
 {
-	fp32 yaw_target;	//ÔÆÌ¨yawÖá¾ø¶Ô½Ç¶ÈÄ¿±ê
-	fp32 pitch_target;	//ÔÆÌ¨pitchÖá¾ø¶Ô½Ç¶ÈÄ¿±ê
+	fp32 yaw_target;	//ï¿½ï¿½Ì¨yawï¿½ï¿½ï¿½ï¿½Ô½Ç¶ï¿½Ä¿ï¿½ï¿½
+	fp32 pitch_target;	//ï¿½ï¿½Ì¨pitchï¿½ï¿½ï¿½ï¿½Ô½Ç¶ï¿½Ä¿ï¿½ï¿½
 
 	fp32 roll;
 	fp32 pitch;
 	fp32 yaw;
-	fp32 yaw_last;		//ÉÏÒ»Ö¡yaw, ÓÃÓÚ½â²øÈÆ
+	fp32 yaw_last;		//ï¿½ï¿½Ò»Ö¡yaw, ï¿½ï¿½ï¿½Ú½ï¿½ï¿½ï¿½ï¿½
 }ins_data_t;
 
-//ÔÆÌ¨¿ØÖÆ½á¹¹Ìå
+//ï¿½ï¿½Ì¨ï¿½ï¿½ï¿½Æ½á¹¹ï¿½ï¿½
 typedef struct
 {
-	const RC_ctrl_t *gimbal_rc_ctrl;			//Ò£¿ØÆ÷
-	const aimbot_task_t *gimbal_aimbot_point;	//ÊÓ¾õÉÏÎ»»ú¸øµÄÄ¿±ê½Ç¶È
-	const fp32 *gimbal_INT_angle_point;			//ÍÓÂÝÒÇ½Ç¶È
-	const fp32 *gimbal_INT_gyro_point;			//ÍÓÂÝÒÇ½ÇËÙ¶È
+	const RC_ctrl_t *gimbal_rc_ctrl;			//Ò£ï¿½ï¿½ï¿½ï¿½
+	const aimbot_task_t *gimbal_aimbot_point;	//ï¿½Ó¾ï¿½ï¿½ï¿½Î»ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ä¿ï¿½ï¿½Ç¶ï¿½
+	const fp32 *gimbal_INT_angle_point;			//ï¿½ï¿½ï¿½ï¿½ï¿½Ç½Ç¶ï¿½
+	const fp32 *gimbal_INT_gyro_point;			//ï¿½ï¿½ï¿½ï¿½ï¿½Ç½ï¿½ï¿½Ù¶ï¿½
 
-	uint8_t aimbot_mode;	//AIMBOT_OFF: Ò£¿ØÆ÷¿ØÖÆ, AIMBOT_ON: ÊÓ¾õÉÏÎ»»ú¿ØÖÆ
-	uint8_t gimbal_mode;	//CHASSIS_NO_MOVE: ÎÞÁ¦, CHASSIS_FOLLOW_INS_YAW: ÍÓÂÝÒÇ¿ØÖÆ
+	uint8_t aimbot_mode;	//AIMBOT_OFF: Ò£ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½, AIMBOT_ON: ï¿½Ó¾ï¿½ï¿½ï¿½Î»ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
+	uint8_t gimbal_mode;	//CHASSIS_NO_MOVE: ï¿½ï¿½ï¿½ï¿½, CHASSIS_FOLLOW_INS_YAW: ï¿½ï¿½ï¿½ï¿½ï¿½Ç¿ï¿½ï¿½ï¿½
 	ins_data_t	ins_data;
 
-	fp32 yaw;	//ÔÆÌ¨Óëµ×ÅÌ²îÖµ, ¸øµ×ÅÌ¸úËæÓÃ
+	fp32 yaw;	//ï¿½ï¿½Ì¨ï¿½ï¿½ï¿½ï¿½Ì²ï¿½Öµ, ï¿½ï¿½ï¿½ï¿½ï¿½Ì¸ï¿½ï¿½ï¿½ï¿½ï¿½
 
-	//ÔÆÌ¨Óëµ×ÅÌ²îÖµ
+	//ï¿½ï¿½Ì¨ï¿½ï¿½ï¿½ï¿½Ì²ï¿½Öµ
 	fp32 err_gimbal_chassis_ecd;
 
-	fp32 yaw_set;		//Ò£¿ØÆ÷¸øµÄÄ¿±ê
-	fp32 pitch_set;		//Ò£¿ØÆ÷¸øµÄÄ¿±ê
+	fp32 yaw_set;		//Ò£ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ä¿ï¿½ï¿½
+	fp32 pitch_set;		//Ò£ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ä¿ï¿½ï¿½
 
-	gimbal_motor_t gimbal_yaw_motor;	//yawµç»ú
-	gimbal_motor_t gimbal_pitch_motor;	//pitchµç»ú
+	gimbal_motor_t gimbal_yaw_motor;	//yawï¿½ï¿½ï¿½
+	gimbal_motor_t gimbal_pitch_motor;	//pitchï¿½ï¿½ï¿½
 
-	//ÊÓ¾õÉÏÎ»»ú×ÔÃéPID
+	//ï¿½Ó¾ï¿½ï¿½ï¿½Î»ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½PID
 	pid_type_def aimbot_speed_pitch_pid;
 	gimbal_PID_t aimbot_angle_pitch_pid;
 	pid_type_def aimbot_speed_yaw_pid;
 	gimbal_PID_t aimbot_angle_yaw_pid;
-	//Ò£¿ØÆ÷ÍÓÂÝÒÇyawÖáPID
+	//Ò£ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½yawï¿½ï¿½PID
 	pid_type_def gimbal_speed_yaw_ins_pid;
 	gimbal_PID_t gimbal_angle_yaw_ins_pid;
-	//Ò£¿ØÆ÷ÍÓÂÝÒÇpitchÖáPID
+	//Ò£ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½pitchï¿½ï¿½PID
 	pid_type_def gimbal_speed_pitch_ins_pid;
 	gimbal_PID_t gimbal_angle_pitch_ins_pid;
+
+	// shooting (trigger + friction wheels)
+	encoding_switch_t shoot_switch;
+	shoot_motor_t gimbal_trigger_motor;
+	shoot_motor_t gimbal_fric_motor[2];
+	pid_type_def gimbal_speed_trigger_pid;
+	pid_type_def gimbal_speed_fric_pid[2];
 } gimbal_control_t;
 
 extern void gimbal_task(void const *pvParameters);

@@ -3,7 +3,7 @@
   * @file       can_receive.c/h
   * @brief      there is CAN interrupt function  to receive motor data,
   *             and CAN send function to send motor current to control motor.
-  *             ÕâÀïÊÇCANÖÐ¶Ï½ÓÊÕº¯Êý£¬½ÓÊÕµç»úÊý¾Ý,CAN·¢ËÍº¯Êý·¢ËÍµç»úµçÁ÷¿ØÖÆµç»ú.
+  *             ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½CANï¿½Ð¶Ï½ï¿½ï¿½Õºï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Õµï¿½ï¿½ï¿½ï¿½ï¿½ï¿½,CANï¿½ï¿½ï¿½Íºï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Íµï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Æµï¿½ï¿½.
   * @note       
   * @history
   *  Version    Date            Author          Modification
@@ -26,7 +26,7 @@
 #define CHASSIS_CAN	hcan1
 #define STEER_CAN	hcan2
 #define GIMBAL_CAN	hcan1
-#define SHOOT_CAN	hcan2
+#define SHOOT_CAN	hcan1
 /* CAN send and receive ID */
 typedef enum
 {
@@ -57,21 +57,21 @@ typedef enum
 	
 } can_msg_id_e;
 
-/* ÊÓ¾õ(ÉÏÎ»»ú NUC)Í¨ÐÅ CAN Ð­Òé ¡ª¡ª ÓëÊÓ¾õ cboard.cpp ÑÏ¸ñÒ»ÖÂ
-   0x0ff:ÊÓ¾õÏÂ·¢ÃüÁî, 0x100:ÉÏ±¨ËÄÔªÊý, 0x101:ÉÏ±¨µ¯ËÙ/Ä£Ê½ */
-#define VISION_CAN            hcan1   // ÊÓ¾õNUC½ÓÈëµÄCAN(Èô½Óhcan2Çë¸ÄÕâÀï)
+/* ï¿½Ó¾ï¿½(ï¿½ï¿½Î»ï¿½ï¿½ NUC)Í¨ï¿½ï¿½ CAN Ð­ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½Ó¾ï¿½ cboard.cpp ï¿½Ï¸ï¿½Ò»ï¿½ï¿½
+   0x0ff:ï¿½Ó¾ï¿½ï¿½Â·ï¿½ï¿½ï¿½ï¿½ï¿½, 0x100:ï¿½Ï±ï¿½ï¿½ï¿½Ôªï¿½ï¿½, 0x101:ï¿½Ï±ï¿½ï¿½ï¿½ï¿½ï¿½/Ä£Ê½ */
+#define VISION_CAN            hcan1   // ï¿½Ó¾ï¿½NUCï¿½ï¿½ï¿½ï¿½ï¿½CAN(ï¿½ï¿½ï¿½ï¿½hcan2ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½)
 #define CAN_VISION_CMD_ID    0x0ff
 #define CAN_VISION_QUAT_ID   0x100
 #define CAN_VISION_FEED_ID   0x101
 
-// ÊÓ¾õÏÂ·¢µÄ×ÔÃéÃüÁî(0x0ff ½âÎö½á¹û)
+// ï¿½Ó¾ï¿½ï¿½Â·ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½(0x0ff ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½)
 typedef struct
 {
-    uint8_t control;           // 1=ÓÐÄ¿±ê,½Ó¹ÜÔÆÌ¨×ÔÃé; 0=ÎÞÄ¿±ê
-    uint8_t shoot;             // 1=ÔÊÐíÉä»÷(ÊÓ¾õauto_fire)
-    fp32    yaw;               // Ä¿±êyaw½Ç (rad)
-    fp32    pitch;             // Ä¿±êpitch½Ç (rad)
-    fp32    horizon_distance;  // Ë®Æ½¾àÀë (m)
+    uint8_t control;           // 1=ï¿½ï¿½Ä¿ï¿½ï¿½,ï¿½Ó¹ï¿½ï¿½ï¿½Ì¨ï¿½ï¿½ï¿½ï¿½; 0=ï¿½ï¿½Ä¿ï¿½ï¿½
+    uint8_t shoot;             // 1=ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½(ï¿½Ó¾ï¿½auto_fire)
+    fp32    yaw;               // Ä¿ï¿½ï¿½yawï¿½ï¿½ (rad)
+    fp32    pitch;             // Ä¿ï¿½ï¿½pitchï¿½ï¿½ (rad)
+    fp32    horizon_distance;  // Ë®Æ½ï¿½ï¿½ï¿½ï¿½ (m)
 } vision_cmd_t;
 
 //rm motor data
@@ -94,11 +94,11 @@ typedef struct
   * @retval         none
   */
 /**
-  * @brief          ·¢ËÍµç»ú¿ØÖÆµçÁ÷(0x205,0x206,0x207,0x208)
-  * @param[in]      yaw: (0x205) 6020µç»ú¿ØÖÆµçÁ÷, ·¶Î§ [-30000,30000]
-  * @param[in]      pitch: (0x206) 6020µç»ú¿ØÖÆµçÁ÷, ·¶Î§ [-30000,30000]
-  * @param[in]      shoot: (0x207) 2006µç»ú¿ØÖÆµçÁ÷, ·¶Î§ [-10000,10000]
-  * @param[in]      rev: (0x208) ±£Áô£¬µç»ú¿ØÖÆµçÁ÷
+  * @brief          ï¿½ï¿½ï¿½Íµï¿½ï¿½ï¿½ï¿½ï¿½Æµï¿½ï¿½ï¿½(0x205,0x206,0x207,0x208)
+  * @param[in]      yaw: (0x205) 6020ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Æµï¿½ï¿½ï¿½, ï¿½ï¿½Î§ [-30000,30000]
+  * @param[in]      pitch: (0x206) 6020ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Æµï¿½ï¿½ï¿½, ï¿½ï¿½Î§ [-30000,30000]
+  * @param[in]      shoot: (0x207) 2006ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Æµï¿½ï¿½ï¿½, ï¿½ï¿½Î§ [-10000,10000]
+  * @param[in]      rev: (0x208) ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Æµï¿½ï¿½ï¿½
   * @retval         none
   */
 extern void CAN_cmd_chassis_steer(int16_t motor1, int16_t motor2, int16_t motor3, int16_t motor4);
@@ -112,11 +112,11 @@ extern void CAN_cmd_chassis_steer(int16_t motor1, int16_t motor2, int16_t motor3
   * @retval         none
   */
 /**
-  * @brief          ·¢ËÍµç»ú¿ØÖÆµçÁ÷(0x201,0x202,0x203,0x204)
-  * @param[in]      motor1: (0x201) 3508µç»ú¿ØÖÆµçÁ÷, ·¶Î§ [-16384,16384]
-  * @param[in]      motor2: (0x202) 3508µç»ú¿ØÖÆµçÁ÷, ·¶Î§ [-16384,16384]
-  * @param[in]      motor3: (0x203) 3508µç»ú¿ØÖÆµçÁ÷, ·¶Î§ [-16384,16384]
-  * @param[in]      motor4: (0x204) 3508µç»ú¿ØÖÆµçÁ÷, ·¶Î§ [-16384,16384]
+  * @brief          ï¿½ï¿½ï¿½Íµï¿½ï¿½ï¿½ï¿½ï¿½Æµï¿½ï¿½ï¿½(0x201,0x202,0x203,0x204)
+  * @param[in]      motor1: (0x201) 3508ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Æµï¿½ï¿½ï¿½, ï¿½ï¿½Î§ [-16384,16384]
+  * @param[in]      motor2: (0x202) 3508ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Æµï¿½ï¿½ï¿½, ï¿½ï¿½Î§ [-16384,16384]
+  * @param[in]      motor3: (0x203) 3508ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Æµï¿½ï¿½ï¿½, ï¿½ï¿½Î§ [-16384,16384]
+  * @param[in]      motor4: (0x204) 3508ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Æµï¿½ï¿½ï¿½, ï¿½ï¿½Î§ [-16384,16384]
   * @retval         none
   */
 extern void CAN_cmd_gimbal(int16_t motor1, int16_t motor2);
@@ -127,7 +127,7 @@ extern void CAN_cmd_gimbal(int16_t motor1, int16_t motor2);
   * @retval         none
   */
 /**
-  * @brief          ·¢ËÍIDÎª0x700µÄCAN°ü,Ëü»áÉèÖÃ3508µç»ú½øÈë¿ìËÙÉèÖÃID
+  * @brief          ï¿½ï¿½ï¿½ï¿½IDÎª0x700ï¿½ï¿½CANï¿½ï¿½,ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½3508ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ID
   * @param[in]      none
   * @retval         none
   */
@@ -142,11 +142,11 @@ extern void CAN_cmd_chassis_reset_ID(void);
   * @retval         none
   */
 /**
-  * @brief          ·¢ËÍµç»ú¿ØÖÆµçÁ÷(0x201,0x202,0x203,0x204)
-  * @param[in]      motor1: (0x201) 3508µç»ú¿ØÖÆµçÁ÷, ·¶Î§ [-16384,16384]
-  * @param[in]      motor2: (0x202) 3508µç»ú¿ØÖÆµçÁ÷, ·¶Î§ [-16384,16384]
-  * @param[in]      motor3: (0x203) 3508µç»ú¿ØÖÆµçÁ÷, ·¶Î§ [-16384,16384]
-  * @param[in]      motor4: (0x204) 3508µç»ú¿ØÖÆµçÁ÷, ·¶Î§ [-16384,16384]
+  * @brief          ï¿½ï¿½ï¿½Íµï¿½ï¿½ï¿½ï¿½ï¿½Æµï¿½ï¿½ï¿½(0x201,0x202,0x203,0x204)
+  * @param[in]      motor1: (0x201) 3508ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Æµï¿½ï¿½ï¿½, ï¿½ï¿½Î§ [-16384,16384]
+  * @param[in]      motor2: (0x202) 3508ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Æµï¿½ï¿½ï¿½, ï¿½ï¿½Î§ [-16384,16384]
+  * @param[in]      motor3: (0x203) 3508ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Æµï¿½ï¿½ï¿½, ï¿½ï¿½Î§ [-16384,16384]
+  * @param[in]      motor4: (0x204) 3508ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Æµï¿½ï¿½ï¿½, ï¿½ï¿½Î§ [-16384,16384]
   * @retval         none
   */
 extern void CAN_cmd_chassis_motor(int16_t motor1, int16_t motor2, int16_t motor3, int16_t motor4);
@@ -160,11 +160,11 @@ extern void CAN_cmd_chassis_motor(int16_t motor1, int16_t motor2, int16_t motor3
   * @retval         none
   */
 /**
-  * @brief          ·¢ËÍµç»ú¿ØÖÆµçÁ÷(0x205,0x206,0x207,0x208)
-  * @param[in]      motor1: (0x205) 6020µç»ú¿ØÖÆµçÁ÷, ·¶Î§ [-30000,30000]
-  * @param[in]      motor2: (0x206) 6020µç»ú¿ØÖÆµçÁ÷, ·¶Î§ [-30000,30000]
-  * @param[in]      motor3: (0x207) 6020µç»ú¿ØÖÆµçÁ÷, ·¶Î§ [-30000,30000]
-  * @param[in]      motor4: (0x208) 6020µç»ú¿ØÖÆµçÁ÷, ·¶Î§ [-30000,30000]
+  * @brief          ï¿½ï¿½ï¿½Íµï¿½ï¿½ï¿½ï¿½ï¿½Æµï¿½ï¿½ï¿½(0x205,0x206,0x207,0x208)
+  * @param[in]      motor1: (0x205) 6020ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Æµï¿½ï¿½ï¿½, ï¿½ï¿½Î§ [-30000,30000]
+  * @param[in]      motor2: (0x206) 6020ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Æµï¿½ï¿½ï¿½, ï¿½ï¿½Î§ [-30000,30000]
+  * @param[in]      motor3: (0x207) 6020ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Æµï¿½ï¿½ï¿½, ï¿½ï¿½Î§ [-30000,30000]
+  * @param[in]      motor4: (0x208) 6020ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Æµï¿½ï¿½ï¿½, ï¿½ï¿½Î§ [-30000,30000]
   * @retval         none
   */
 extern void CAN_cmd_shoot(int16_t motor1, int16_t motor2, int16_t motor3);
@@ -175,9 +175,9 @@ extern void CAN_cmd_shoot(int16_t motor1, int16_t motor2, int16_t motor3);
   * @retval         motor data point
   */
 /**
-  * @brief          ·µ»Øµ×ÅÌ6020µç»úµÄÊý¾ÝÖ¸Õë
+  * @brief          ï¿½ï¿½ï¿½Øµï¿½ï¿½ï¿½6020ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ö¸ï¿½ï¿½
   * @param[in]      none
-  * @retval         µç»úÊý¾ÝÖ¸Õë
+  * @retval         ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ö¸ï¿½ï¿½
   */
 extern const motor_measure_t *get_chassis_steer_measure_point(uint8_t i);
 
@@ -187,9 +187,9 @@ extern const motor_measure_t *get_chassis_steer_measure_point(uint8_t i);
   * @retval         motor data point
   */
 /**
-  * @brief          ·µ»Øµ×ÅÌµç»ú 3508µç»úÊý¾ÝÖ¸Õë
-  * @param[in]      i: µç»ú±àºÅ,·¶Î§[0,3]
-  * @retval         µç»úÊý¾ÝÖ¸Õë
+  * @brief          ï¿½ï¿½ï¿½Øµï¿½ï¿½Ìµï¿½ï¿½ 3508ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ö¸ï¿½ï¿½
+  * @param[in]      i: ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½,ï¿½ï¿½Î§[0,3]
+  * @retval         ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ö¸ï¿½ï¿½
   */
 extern const motor_measure_t *get_chassis_motor_measure_point(uint8_t i);
 
@@ -200,9 +200,9 @@ extern const motor_measure_t *get_chassis_motor_measure_point(uint8_t i);
   * @retval         motor data point
   */
 /**
-  * @brief          ·µ»ØÔÆÌ¨6020µç»úµÄÊý¾ÝÖ¸Õë
+  * @brief          ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ì¨6020ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ö¸ï¿½ï¿½
   * @param[in]      none
-  * @retval         µç»úÊý¾ÝÖ¸Õë
+  * @retval         ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ö¸ï¿½ï¿½
   */
 extern const motor_measure_t *get_gimbal_motor_measure_point(uint8_t i);
 
@@ -212,13 +212,13 @@ extern const motor_measure_t *get_gimbal_motor_measure_point(uint8_t i);
   * @retval         motor data point
   */
 /**
-  * @brief          ·µ»ØÔÆÌ¨6020µç»úµÄÊý¾ÝÖ¸Õë
+  * @brief          ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ì¨6020ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ö¸ï¿½ï¿½
   * @param[in]      none
-  * @retval         µç»úÊý¾ÝÖ¸Õë
+  * @retval         ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ö¸ï¿½ï¿½
   */
 extern const motor_measure_t *get_shoot_motor_measure_point(uint8_t i);
 
-/* ÊÓ¾õÍ¨ÐÅ½Ó¿Ú */
+/* ï¿½Ó¾ï¿½Í¨ï¿½Å½Ó¿ï¿½ */
 extern vision_cmd_t vision_cmd;
 extern const vision_cmd_t *get_vision_cmd_point(void);
 extern void CAN_cmd_vision_quat(const fp32 quat[4]);

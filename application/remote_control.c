@@ -5,9 +5,9 @@
   *             资源，利用串口空闲中断来拉起处理函数，同时提供一些掉线重启DMA，串口
   *             的方式保证热插拔的稳定性。
   * @note       该任务是通过串口中断启动，不是freeRTOS任务
-  * @history
-  *  Version    Date            Author          Modification
+  * @history  *  Version    Date            Author          Modification
   *  V1.0.0     Dec-26-2018     RM              1. done
+
   *  V1.0.0     Nov-11-2019     RM              1. support development board tpye c
   *
   @verbatim

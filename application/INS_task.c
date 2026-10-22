@@ -129,7 +129,7 @@ static const fp32 fliter_num[3] = {1.929454039488895f, -0.93178349823448126f, 0.
 fp32 INS_gyro[3] = {0.0f, 0.0f, 0.0f};
 static fp32 INS_accel[3] = {0.0f, 0.0f, 0.0f};
 static fp32 INS_mag[3] = {0.0f, 0.0f, 0.0f};
-static fp32 INS_quat[4] = {0.0f, 0.0f, 0.0f, 0.0f};
+fp32 INS_quat[4] = {0.0f, 0.0f, 0.0f, 0.0f};
 fp32 INS_angle[3] = {0.0f, 0.0f, 0.0f};      //euler angle, unit rad.Å·À­½Ç µ¥Î» rad
 
 

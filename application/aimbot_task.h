@@ -7,12 +7,12 @@
 #define AIMBOT_CONTROL_TIME 100
 #define AIMBOT_AUTO_FIRE_THRE   20.0f
 
-// ===== ���Կ���: 1=��·�Ӿ�, �ù̶�Ŀ�����λ����·; ������Ļ� 0 =====
+// ===== 调试开关: 1=旁路视觉, 用固定目标测下位机环路; 调试完改回 0 =====
 #define AIMBOT_DEBUG_BYPASS   0
 
-// ===== ����: 1=����pitchĿ��(���غ�Ϊ0), ֻ���Ӿ���yaw; ����Ļ� 0 =====
-#define AIMBOT_DEBUG_FREEZE_PITCH  1
-// ===== ����: 1=ͬ������yawĿ��(���ᶼ��˿����); ����Ļ� 0 =====
+// ===== 调试: 1=冻结pitch目标(力矩恒为0), 只让视觉给yaw; 测完改回 0 =====
+#define AIMBOT_DEBUG_FREEZE_PITCH  0
+// ===== 调试: 1=同样冻结yaw目标(两轴都纹丝不动); 测完改回 0 =====
 #define AIMBOT_DEBUG_FREEZE_YAW    0
 #define AIMBOT_DEBUG_YAW      0.0f
 #define AIMBOT_DEBUG_PITCH    -0.2f

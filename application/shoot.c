@@ -5,7 +5,7 @@
 #define TRIGGER_ANGLE_KD		0.0f
 #define TRIGGER_ANGLE_MAX_OUT	10000.0f
 #define TRIGGER_ANGLE_MAX_IOUT	0.0f
-//·À¶Â×ªµçÁ÷ãÐÖµ
+//ï¿½ï¿½ï¿½ï¿½×ªï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Öµ
 #define TRIGGER_CURRENT_THRE	8500.0f
 
 shoot_task_t shoot;
@@ -23,15 +23,15 @@ void shoot_task(uint8_t *trigger_state_out, uint8_t shoot_mode, uint8_t fric_mod
 	shoot_feedback(&shoot);
 	Motor_Angle_Cal(&shoot, TRIGGER_RATIO);
 	static uint16_t i;
-	//±êÖ¾Î»ÓÃÀ´ÅÐ¶ÏÊÇ·ñ°´ÏÂÊó±ê
+	//ï¿½ï¿½Ö¾Î»ï¿½ï¿½ï¿½ï¿½ï¿½Ð¶ï¿½ï¿½Ç·ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
 
 static uint8_t trigger_add_state = 0;
 	if(shoot_mode != SHOOT_STOP&&fric_mode == FRIC_START)
 	{
 		if(trigger_add_state == 0)
 		{
-			if(gimbal_shoot_heat_control() == 0||shoot_mode == SHOOT_WITHOUT_CONTROL)
-				shoot.angle_set += TRIGGER_OUT_VAL;
+//			if(gimbal_shoot_heat_control() == 0||shoot_mode == SHOOT_WITHOUT_CONTROL)
+			shoot.angle_set += TRIGGER_OUT_VAL;
 			trigger_add_state = 1;
 		}
 	}
@@ -60,7 +60,7 @@ static uint8_t trigger_add_state = 0;
 //		trigger_add_state = 0;
 //		i = 0;
 //	}
-	//¶Â×ªÅÐ¶Ï
+	//ï¿½ï¿½×ªï¿½Ð¶ï¿½
 	shoot.trigger_state = trigger_prevent_stall(&shoot.angle_set, shoot.shoot_trigger_t.shoot_motor_measure->given_current, shoot.shoot_trigger_t.speed);
 	*speed = PID_calc(&shoot.trigger_angle_pid, shoot.angle.POS_ABS, shoot.angle_set);
 	*trigger_state_out = shoot.trigger_state;
@@ -78,7 +78,7 @@ void shoot_init(void)
 void shoot_feedback(shoot_task_t *shoot_feedback_point)
 {
 	shoot_feedback_point->shoot_trigger_t.relative_angle = shoot_feedback_point->shoot_trigger_t.shoot_motor_measure->ecd;
-	//×ª½Ç¶ÈÖÆ
+	//×ªï¿½Ç¶ï¿½ï¿½ï¿½
 	shoot_feedback_point->real_angle = shoot_feedback_point->shoot_trigger_t.relative_angle/8192.0f*360.0f;
 	shoot_feedback_point->trigger_ecd = shoot_feedback_point->shoot_trigger_t.shoot_motor_measure->ecd;
 	shoot_feedback_point->shoot_trigger_t.speed = shoot_feedback_point->shoot_trigger_t.shoot_motor_measure->speed_rpm;
@@ -110,16 +110,16 @@ void Motor_Angle_Cal(shoot_task_t *shoot_motor_point, float T)
 
 	if(shoot_motor_point->angle.eer>0)
 	{
-		res1=shoot_motor_point->angle.eer-T;//·´×ª£¬×Ô¼õ
+		res1=shoot_motor_point->angle.eer-T;//ï¿½ï¿½×ªï¿½ï¿½ï¿½Ô¼ï¿½
 		res2=shoot_motor_point->angle.eer;
 	}
 	else
 	{
-		res1=shoot_motor_point->angle.eer+T;//Õý×ª£¬×Ô¼ÓÒ»¸öÖÜÆÚµÄ½Ç¶ÈÖµ£¨360£©
+		res1=shoot_motor_point->angle.eer+T;//ï¿½ï¿½×ªï¿½ï¿½ï¿½Ô¼ï¿½Ò»ï¿½ï¿½ï¿½ï¿½ï¿½ÚµÄ½Ç¶ï¿½Öµï¿½ï¿½360ï¿½ï¿½
 		res2=shoot_motor_point->angle.eer;
 	}
 
-	if(fabs(res1)<fabs(res2)) //²»¹ÜÕý·´×ª£¬¿Ï¶¨ÊÇ×ªµÄ½Ç¶ÈÐ¡µÄÄÇ¸öÊÇÕæµÄ
+	if(fabs(res1)<fabs(res2)) //ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½×ªï¿½ï¿½ï¿½Ï¶ï¿½ï¿½ï¿½×ªï¿½Ä½Ç¶ï¿½Ð¡ï¿½ï¿½ï¿½Ç¸ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
 	{
 		shoot_motor_point->angle.eer_eer = res1;
 	}
